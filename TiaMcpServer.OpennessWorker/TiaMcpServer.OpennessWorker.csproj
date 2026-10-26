@@ -31,17 +31,17 @@
 
   <ItemGroup>
     <Reference Include="Siemens.Engineering.Base">
-      <HintPath>$(TiaOpennessReferenceDir)\Siemens.Engineering.Base.dll</HintPath>
+      <HintPath>$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.Base.dll</HintPath>
       <Private>False</Private>
       <ExcludeAssets>runtime</ExcludeAssets>
     </Reference>
     <Reference Include="Siemens.Engineering.Step7">
-      <HintPath>$(TiaOpennessReferenceDir)\Siemens.Engineering.Step7.dll</HintPath>
+      <HintPath>$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.Step7.dll</HintPath>
       <Private>False</Private>
       <ExcludeAssets>runtime</ExcludeAssets>
     </Reference>
     <Reference Include="Siemens.Engineering.WinCCUnified">
-      <HintPath>$(TiaOpennessReferenceDir)\Siemens.Engineering.WinCCUnified.dll</HintPath>
+      <HintPath>$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.WinCCUnified.dll</HintPath>
       <Private>False</Private>
       <ExcludeAssets>runtime</ExcludeAssets>
     </Reference>
@@ -50,7 +50,7 @@
   <Target Name="ValidateTiaOpennessReferences" BeforeTargets="ResolveReferences">
     <Message Importance="High"
              Text="TIA Openness compile references: $(TiaOpennessReferenceDir) (UseTiaPortalReferenceStubs=$(UseTiaPortalReferenceStubs))" />
-    <Error Condition="!Exists('$(TiaOpennessReferenceDir)\Siemens.Engineering.Base.dll') or !Exists('$(TiaOpennessReferenceDir)\Siemens.Engineering.Step7.dll') or !Exists('$(TiaOpennessReferenceDir)\Siemens.Engineering.WinCCUnified.dll')"
+    <Error Condition="!Exists('$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.Base.dll') or !Exists('$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.Step7.dll') or !Exists('$(TiaOpennessReferenceDir)\V21\Siemens.Engineering.WinCCUnified.dll')"
            Text="TIA Portal V21 Openness reference assemblies were not found in '$(TiaOpennessReferenceDir)'. Install TIA Portal V21, set TiaPortalV21Dir, or build with /p:UseTiaPortalReferenceStubs=true for CI/package builds." />
   </Target>
 </Project>
