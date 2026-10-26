@@ -1,4 +1,6 @@
+#if !TIA_V20_NO_COMM_CONNECTIONS
 using Siemens.Engineering.HW.CommunicationConnections;
+#endif
 
 namespace TiaMcpServer.OpennessWorker.Openness.Network;
 
@@ -7,6 +9,16 @@ namespace TiaMcpServer.OpennessWorker.Openness.Network;
 /// </summary>
 public static class ConnectionModeledAttributeAdapters
 {
+#if TIA_V20_NO_COMM_CONNECTIONS
+    public static bool TryCreateReader(
+        ResolvedNetworkObject resolved,
+        string adapterKey,
+        out Func<object?>? reader)
+    {
+        reader = null;
+        return false;
+    }
+#else
     public static bool TryCreateReader(
         ResolvedNetworkObject resolved,
         string adapterKey,
@@ -104,4 +116,5 @@ public static class ConnectionModeledAttributeAdapters
         reader = null;
         return false;
     }
+#endif
 }

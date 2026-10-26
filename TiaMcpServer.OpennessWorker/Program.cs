@@ -27,17 +27,17 @@ namespace TiaMcpServer.OpennessWorker;
 
 internal static class Program
 {
-    // TIA Portal 권한 요청 다이얼로그는 Attach() 호출마다 뜬다.
-    // 세션을 프로세스 수명 동안 재사용해 Attach()를 최초 1회만 호출한다.
-    private static readonly WorkerTiaPortalSession _sharedSession = new(allowTiaConfirmations: true);
-    private static readonly MultiuserInventoryService _sharedInventory = new(_sharedSession);
+    private static readonly WorkerTiaPortalSession _sharedSession;
+    private static readonly MultiuserInventoryService _sharedInventory;
 
     private static readonly McpAccessMode _accessMode = WorkerOperationAuthorization.ParseAccessMode(
         Environment.GetCommandLineArgs());
 
     static Program()
     {
-        AssemblyResolver.Register();
+        AssemblyResolver.Register(); // zuerst
+        _sharedSession = new WorkerTiaPortalSession(allowTiaConfirmations: true);
+        _sharedInventory = new MultiuserInventoryService(_sharedSession);
     }
 
     private static void Main()

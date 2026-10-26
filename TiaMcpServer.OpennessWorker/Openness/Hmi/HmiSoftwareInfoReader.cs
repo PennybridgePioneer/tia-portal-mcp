@@ -60,9 +60,11 @@ public static class HmiSoftwareInfoReader
                 ("BitSelection", () => settings.BitSelection),
                 ("BitSelectionStrategyForResourceLists", () => settings.BitSelectionStrategyForResourceLists),
                 ("BitSelectionStrategyForTagDynamization", () => settings.BitSelectionStrategyForTagDynamization),
+#if !TIA_V20_NO_COMM_CONNECTIONS
                 ("CentralInputHint", () => settings.CentralInputHint),
                 ("CentralPanning", () => settings.CentralPanning),
                 ("CentralZooming", () => settings.CentralZooming),
+#endif
                 ("EnableLanguageCompatibleFontFamilies", () => settings.EnableLanguageCompatibleFontFamilies),
                 ("GMPEnabled", () => settings.GMPEnabled),
                 ("GeneralESIGCommentsStrategy", () => settings.GeneralESIGCommentsStrategy),
@@ -70,18 +72,24 @@ public static class HmiSoftwareInfoReader
                 ("StartScreen", () => settings.StartScreen),
             }),
             LanguageAndFonts = ReadLanguageAndFonts(settings, log),
+#if !TIA_V20_NO_COMM_CONNECTIONS
             ExclusiveOperation = SubSection(log, "HmiExclusiveOperationSettings", () => settings.HmiExclusiveOperationSettings,
                 s => new (string, Func<object?>)[]
                 {
                     ("ExclusiveOperationControlTag", () => s.ExclusiveOperationControlTag),
                     ("ExclusiveOperationStatusTag", () => s.ExclusiveOperationStatusTag),
                 }),
+#else
+            ExclusiveOperation = null,
+#endif
             UnifiedTags = SubSection(log, "HmiUnifiedTagSettings", () => settings.HmiUnifiedTagSettings,
                 s => new (string, Func<object?>)[]
                 {
                     ("IgnoreInitialQCNotifications", () => s.IgnoreInitialQCNotifications),
                     ("IgnoreTimestampNotifications", () => s.IgnoreTimestampNotifications),
+#if !TIA_V20_NO_COMM_CONNECTIONS
                     ("TagOptimizationActive", () => s.TagOptimizationActive),
+#endif
                 }),
             Reporting = SubSection(log, "HmiReportingSettings", () => settings.HmiReportingSettings,
                 s => new (string, Func<object?>)[]
@@ -154,10 +162,17 @@ public static class HmiSoftwareInfoReader
     public static HmiTextAndGraphicListsInfo ListTextAndGraphicLists(HmiSoftware software)
     {
         var log = new HmiReadLog();
+        List<string> graphicLists;
+#if TIA_V20_NO_COMM_CONNECTIONS
+        graphicLists = new List<string>();
+        log.Note("Graphic list enumeration is not available in the V20 worker.");
+#else
+        graphicLists = ReadNames(() => software.HmiGraphicLists, l => l.Name, "graphic lists", log);
+#endif
         return new HmiTextAndGraphicListsInfo
         {
             TextLists = ReadNames(() => software.HmiTextLists, l => l.Name, "text lists", log),
-            GraphicLists = ReadNames(() => software.HmiGraphicLists, l => l.Name, "graphic lists", log),
+            GraphicLists = graphicLists,
             SystemTextLists = ReadNames(() => software.HmiSystemTextLists, l => l.Name, "system text lists", log),
             IsComplete = log.IsComplete,
             Messages = log.Messages,

@@ -12,8 +12,10 @@ internal static class ConfiguredProjectPath
     public static string? Validate(string? path) =>
         !string.IsNullOrWhiteSpace(path)
         && Path.IsPathFullyQualified(path)
-        && (string.Equals(Path.GetExtension(path), ".ap21", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(Path.GetExtension(path), ".ap20", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetExtension(path), ".amc20", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetExtension(path), ".ap21", StringComparison.OrdinalIgnoreCase)
             || string.Equals(Path.GetExtension(path), ".amc21", StringComparison.OrdinalIgnoreCase))
             ? null
-            : "must be an absolute .ap21 or .amc21 engineering path.";
+            : "must be an absolute .ap20, .amc20, .ap21 or .amc21 engineering path.";
 }

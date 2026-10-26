@@ -187,7 +187,11 @@ public static class HmiTagReader
             Connection = log.Try(() => tag.Connection, What("Connection")),
             PlcTag = log.Try(() => tag.PlcTag, What("PlcTag")),
             PlcName = log.Try(() => tag.PlcName, What("PlcName")),
+#if TIA_V20_NO_COMM_CONNECTIONS
+            DisplayName = null,
+#else
             DisplayName = log.ReadText(() => tag.DisplayName, language, What("DisplayName")),
+#endif
             DataType = log.Try(() => tag.DataType, What("DataType")),
             HmiDataType = log.Try(() => tag.HmiDataType, What("HmiDataType")),
             Address = log.Try(() => tag.Address, What("Address")),

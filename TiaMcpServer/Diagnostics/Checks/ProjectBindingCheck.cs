@@ -64,18 +64,20 @@ public sealed class ProjectBindingCheck : IDiagnosticCheck
                 Name,
                 DiagnosticStatus.Failed,
                 $"Project binding configured via {bindingSource} is not an absolute path: {configuredPath}",
-                "Use the absolute path of the intended TIA Portal V21 .ap21 project.",
+                "Use the absolute path of the intended TIA Portal .ap20/.ap21 project.",
                 evidence);
         }
 
-        if (!string.Equals(Path.GetExtension(configuredPath), ".ap21", StringComparison.OrdinalIgnoreCase))
+        var extension = Path.GetExtension(configuredPath);
+        if (!string.Equals(extension, ".ap20", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".ap21", StringComparison.OrdinalIgnoreCase))
         {
             return new DiagnosticCheckResult(
                 Id,
                 Name,
                 DiagnosticStatus.Failed,
-                $"Project binding configured via {bindingSource} is not a TIA Portal V21 .ap21 file: {configuredPath}",
-                "Point the binding at the exact .ap21 project file, not its containing directory or an archive.",
+                $"Project binding configured via {bindingSource} is not a TIA Portal .ap20 or .ap21 file: {configuredPath}",
+                "Point the binding at the exact .ap20 or .ap21 project file, not its containing directory or an archive.",
                 evidence);
         }
 
@@ -108,7 +110,7 @@ public sealed class ProjectBindingCheck : IDiagnosticCheck
                 Name,
                 DiagnosticStatus.Failed,
                 $"Project binding configured via {bindingSource} does not exist: {fullPath}",
-                "Correct the path or restore the .ap21 project file before starting the MCP server.",
+                "Correct the path or restore the .ap20/.ap21 project file before starting the MCP server.",
                 evidence);
         }
 
@@ -116,7 +118,7 @@ public sealed class ProjectBindingCheck : IDiagnosticCheck
             Id,
             Name,
             DiagnosticStatus.Warning,
-            $"Project binding configured via {bindingSource} points to an existing .ap21 file: {fullPath}. "
+            $"Project binding configured via {bindingSource} points to an existing .ap20/.ap21 file: {fullPath}. "
                 + "Doctor did not attach to TIA Portal or verify which process has it open.",
             "Before using project tools, call bind_project with this exact project's path after opening it in one TIA Portal process. A configured --project path can also be verified by the host.",
             evidence);

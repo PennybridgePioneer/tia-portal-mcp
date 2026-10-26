@@ -6,18 +6,63 @@ namespace TiaMcpServer.OpennessWorker.Openness.Infrastructure;
 
 public static class AssemblyResolver
 {
-    private const string TiaPortalV21DirEnvironmentVariable = "TiaPortalV21Dir";
     private const string TiaPortalLocationEnvironmentVariable = "TiaPortalLocation";
+
+    private const string TiaPortalV21DirEnvironmentVariable = "TiaPortalV21Dir";
+    private const string TiaPortalV20DirEnvironmentVariable = "TiaPortalV20Dir";
+
     private const string TiaPortalV21RegistrySubKey =
         @"SOFTWARE\Siemens\Automation\InstalledApps\Totally Integrated Automation Portal V21";
-    private const string StandardOpennessInstallPath =
-        @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
-    private const string PublicApiSuffix = @"PublicAPI\V21\net48";
+    private const string TiaPortalV20RegistrySubKey =
+        @"SOFTWARE\Siemens\Automation\InstalledApps\Totally Integrated Automation Portal V20";
 
-    private static readonly string[] RequiredAssemblies =
+    private const string PublicApiV21Suffix = @"PublicAPI\V21\net48";
+    private const string PublicApiV20Suffix = @"PublicAPI\V20";
+
+    private const string StandardV21OpennessInstallPath =
+        @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
+    private const string StandardV20OpennessInstallPath =
+        @"C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20";
+
+    private static readonly string[] RequiredAssembliesV21 =
     {
         "Siemens.Engineering.Base.dll",
         "Siemens.Engineering.Step7.dll"
+    };
+
+    private static readonly string[] RequiredAssembliesV20 =
+    {
+        "Siemens.Engineering.dll"
+    };
+
+    private sealed class OpennessProfile
+    {
+        public string Name { get; set; } = string.Empty;
+        public string EnvDirVariable { get; set; } = string.Empty;
+        public string RegistrySubKey { get; set; } = string.Empty;
+        public string PublicApiSuffix { get; set; } = string.Empty;
+        public string DefaultApiPath { get; set; } = string.Empty;
+        public string[] RequiredAssemblies { get; set; } = Array.Empty<string>();
+    }
+
+    private static readonly OpennessProfile V21Profile = new()
+    {
+        Name = "V21",
+        EnvDirVariable = TiaPortalV21DirEnvironmentVariable,
+        RegistrySubKey = TiaPortalV21RegistrySubKey,
+        PublicApiSuffix = PublicApiV21Suffix,
+        DefaultApiPath = StandardV21OpennessInstallPath,
+        RequiredAssemblies = RequiredAssembliesV21
+    };
+
+    private static readonly OpennessProfile V20Profile = new()
+    {
+        Name = "V20",
+        EnvDirVariable = TiaPortalV20DirEnvironmentVariable,
+        RegistrySubKey = TiaPortalV20RegistrySubKey,
+        PublicApiSuffix = PublicApiV20Suffix,
+        DefaultApiPath = StandardV20OpennessInstallPath,
+        RequiredAssemblies = RequiredAssembliesV20
     };
 
     public static void Register()
@@ -28,30 +73,47 @@ public static class AssemblyResolver
 
     internal static string ExpandTiaPortalLocation(string tiaPortalRoot)
     {
-        return Path.Combine(tiaPortalRoot.Trim().Trim('"'), PublicApiSuffix);
+        // Für bestehende Tests/Callsites weiterhin V21 als Default beibehalten.
+        return ExpandTiaPortalLocation(tiaPortalRoot, PublicApiV21Suffix);
+    }
+
+    internal static string ExpandTiaPortalLocation(string tiaPortalRoot, string publicApiSuffix)
+    {
+        return Path.Combine(tiaPortalRoot.Trim().Trim('"'), publicApiSuffix);
     }
 
     internal static IEnumerable<string> CreateCandidatePaths(
-        string? tiaPortalV21Dir,
+        string? tiaPortalDir,
         string? tiaPortalLocation,
         IEnumerable<string?> registryInstallPaths,
         string defaultPath)
     {
-        if (!string.IsNullOrWhiteSpace(tiaPortalV21Dir))
+        // Für bestehende Tests/Callsites weiterhin V21 als Default beibehalten.
+        return CreateCandidatePaths(tiaPortalDir, tiaPortalLocation, registryInstallPaths, defaultPath, PublicApiV21Suffix);
+    }
+
+    internal static IEnumerable<string> CreateCandidatePaths(
+        string? tiaPortalDir,
+        string? tiaPortalLocation,
+        IEnumerable<string?> registryInstallPaths,
+        string defaultPath,
+        string publicApiSuffix)
+    {
+        if (!string.IsNullOrWhiteSpace(tiaPortalDir))
         {
-            yield return tiaPortalV21Dir!.Trim().Trim('"');
+            yield return tiaPortalDir.Trim().Trim('"');
         }
 
         if (!string.IsNullOrWhiteSpace(tiaPortalLocation))
         {
-            yield return ExpandTiaPortalLocation(tiaPortalLocation!);
+            yield return ExpandTiaPortalLocation(tiaPortalLocation, publicApiSuffix);
         }
 
         foreach (var registryInstallPath in registryInstallPaths)
         {
             if (!string.IsNullOrWhiteSpace(registryInstallPath))
             {
-                yield return ExpandTiaPortalLocation(registryInstallPath!);
+                yield return ExpandTiaPortalLocation(registryInstallPath, publicApiSuffix);
             }
         }
 
@@ -79,13 +141,13 @@ public static class AssemblyResolver
     {
         var requestedName = new AssemblyName(args.Name);
 
-        if (requestedName.Name is null ||
-            !requestedName.Name.StartsWith("Siemens.Engineering.", StringComparison.Ordinal))
+        if (!IsSiemensEngineeringAssembly(requestedName.Name))
         {
             return null;
         }
 
-        var opennessInstallPath = GetOpennessInstallPath();
+        var profile = GetActiveProfile();
+        var opennessInstallPath = GetOpennessInstallPath(profile);
         var assemblyPath = Path.Combine(opennessInstallPath, $"{requestedName.Name}.dll");
 
         if (!File.Exists(assemblyPath))
@@ -95,30 +157,55 @@ public static class AssemblyResolver
 
         var loadedAssembly = Assembly.LoadFrom(assemblyPath);
 
-        if (!string.Equals(requestedName.FullName, loadedAssembly.GetName().FullName, StringComparison.Ordinal))
+        // Nicht hart auf FullName/version scheitern lassen:
+        // Patch-/Build-Unterschiede zwischen Referenz und installiertem TIA dürfen den Worker nicht killen.
+        if (!string.Equals(requestedName.Name, loadedAssembly.GetName().Name, StringComparison.Ordinal))
         {
-            throw new FileNotFoundException("TIA Portal Openness version does not match the requested assembly.", assemblyPath);
+            return null;
         }
 
         return loadedAssembly;
     }
 
-    private static string GetOpennessInstallPath()
+    private static bool IsSiemensEngineeringAssembly(string? assemblyName)
+    {
+        return assemblyName is not null &&
+               (string.Equals(assemblyName, "Siemens.Engineering", StringComparison.Ordinal) ||
+                assemblyName.StartsWith("Siemens.Engineering.", StringComparison.Ordinal));
+    }
+
+    private static OpennessProfile GetActiveProfile()
+    {
+        var entryAssemblyName = Assembly.GetEntryAssembly()?.GetName().Name;
+
+        if (entryAssemblyName is not null &&
+            entryAssemblyName.EndsWith(".V20", StringComparison.Ordinal))
+        {
+            return V20Profile;
+        }
+
+        return V21Profile;
+    }
+
+    private static string GetOpennessInstallPath(OpennessProfile profile)
     {
         var checkedLocations = new List<string>();
-        var environmentPath = Environment.GetEnvironmentVariable(TiaPortalV21DirEnvironmentVariable);
+        var environmentPath = Environment.GetEnvironmentVariable(profile.EnvDirVariable);
         var tiaPortalLocation = Environment.GetEnvironmentVariable(TiaPortalLocationEnvironmentVariable);
         var registryInstallPaths = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? GetRegistryInstallPaths(checkedLocations)
+            ? GetRegistryInstallPaths(profile, checkedLocations)
             : Enumerable.Empty<string?>();
+
         var candidates = CreateCandidatePaths(
             environmentPath,
             tiaPortalLocation,
             registryInstallPaths,
-            StandardOpennessInstallPath);
+            profile.DefaultApiPath,
+            profile.PublicApiSuffix);
+
         var selected = SelectFirstCompleteCandidate(
             candidates,
-            ContainsRequiredAssemblies,
+            path => ContainsRequiredAssemblies(path, profile.RequiredAssemblies),
             path => checkedLocations.Add(path));
 
         if (selected is not null)
@@ -127,12 +214,12 @@ public static class AssemblyResolver
         }
 
         throw new FileNotFoundException(
-            "TIA Portal V21 Openness assemblies were not found. Checked locations: " +
+            $"TIA Portal {profile.Name} Openness assemblies were not found. Checked locations: " +
             string.Join("; ", checkedLocations) +
-            $". Set {TiaPortalV21DirEnvironmentVariable} to the folder containing Siemens.Engineering.*.dll files.");
+            $". Set {profile.EnvDirVariable} to the folder containing Siemens.Engineering*.dll files.");
     }
 
-    private static IEnumerable<string?> GetRegistryInstallPaths(List<string> checkedLocations)
+    private static IEnumerable<string?> GetRegistryInstallPaths(OpennessProfile profile, List<string> checkedLocations)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -141,9 +228,9 @@ public static class AssemblyResolver
 
         foreach (var registryView in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            var registryPath = $@"HKLM\{TiaPortalV21RegistrySubKey} ({registryView})";
+            var registryPath = $@"HKLM\{profile.RegistrySubKey} ({registryView})";
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, registryView);
-            using var key = baseKey.OpenSubKey(TiaPortalV21RegistrySubKey);
+            using var key = baseKey.OpenSubKey(profile.RegistrySubKey);
 
             if (key is null)
             {
@@ -152,7 +239,7 @@ public static class AssemblyResolver
             }
 
             var installPath = key.GetValue("INSTALLPATH") as string;
-            if (installPath is null || installPath.Trim().Length == 0)
+            if (string.IsNullOrWhiteSpace(installPath))
             {
                 checkedLocations.Add($"{registryPath}: INSTALLPATH not set");
                 continue;
@@ -162,9 +249,9 @@ public static class AssemblyResolver
         }
     }
 
-    private static bool ContainsRequiredAssemblies(string directoryPath)
+    private static bool ContainsRequiredAssemblies(string directoryPath, IEnumerable<string> requiredAssemblies)
     {
         return Directory.Exists(directoryPath) &&
-            RequiredAssemblies.All(assemblyName => File.Exists(Path.Combine(directoryPath, assemblyName)));
+               requiredAssemblies.All(assemblyName => File.Exists(Path.Combine(directoryPath, assemblyName)));
     }
 }

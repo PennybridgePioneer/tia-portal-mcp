@@ -31,33 +31,55 @@
     <None Include="../LICENSE" Pack="true" PackagePath="/" />
   </ItemGroup>
 
-  <Target Name="BuildOpennessWorker" BeforeTargets="Build">
-    <MSBuild Projects="..\TiaMcpServer.OpennessWorker\TiaMcpServer.OpennessWorker.csproj"
+  <Target Name="BuildOpennessWorkers" BeforeTargets="Build">
+    <MSBuild Projects="..\TiaMcpServer.OpennessWorker\TiaMcpServer.OpennessWorker.V21.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;SelfContained;PackAsTool" />
+    <MSBuild Projects="..\TiaMcpServer.OpennessWorker\TiaMcpServer.OpennessWorker.V20.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)"
       RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier;SelfContained;PackAsTool" />
   </Target>
 
-  <Target Name="CopyOpennessWorker" AfterTargets="Build" BeforeTargets="PackTool">
+  <Target Name="CopyOpennessWorkers" AfterTargets="Build" BeforeTargets="PackTool">
     <RemoveDir Directories="$(OutputPath)openness-worker" />
+
     <ItemGroup>
-      <OpennessWorkerFiles
-        Include="..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\**\*.*"
-        Exclude="..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\**\*.runtimeconfig.json" />
+      <OpennessWorkerV21Files
+        Include="..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\*.*"
+        Exclude="..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\*.runtimeconfig.json" />
+      <OpennessWorkerV20Files
+        Include="..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\*.*"
+        Exclude="..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\*.runtimeconfig.json" />
     </ItemGroup>
-    <Copy SourceFiles="@(OpennessWorkerFiles)"
-      DestinationFiles="@(OpennessWorkerFiles->'$(OutputPath)openness-worker\%(RecursiveDir)%(Filename)%(Extension)')"
+
+    <Copy SourceFiles="@(OpennessWorkerV21Files)"
+      DestinationFiles="@(OpennessWorkerV21Files->'$(OutputPath)openness-worker\V21\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OpennessWorkerV20Files)"
+      DestinationFiles="@(OpennessWorkerV20Files->'$(OutputPath)openness-worker\V20\%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="RegisterOpennessWorkerPublishFiles" AfterTargets="ComputeFilesToPublish">
     <RemoveDir Directories="$(PublishDir)openness-worker" />
     <ItemGroup>
-      <OpennessWorkerPublishFiles
-        Include="..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\**\*.*"
-        Exclude="..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\$(Configuration)\net48\**\*.runtimeconfig.json" />
-      <ResolvedFileToPublish Include="@(OpennessWorkerPublishFiles)">
-        <RelativePath>openness-worker\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+      <OpennessWorkerV21PublishFiles
+        Include="..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\*.*"
+        Exclude="..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\V21\$(Configuration)\**\*.runtimeconfig.json" />
+      <OpennessWorkerV20PublishFiles
+        Include="..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\*.*"
+        Exclude="..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\Siemens.Engineering*.dll;..\TiaMcpServer.OpennessWorker\bin\V20\$(Configuration)\**\*.runtimeconfig.json" />
+
+      <ResolvedFileToPublish Include="@(OpennessWorkerV21PublishFiles)">
+        <RelativePath>openness-worker\V21\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+
+      <ResolvedFileToPublish Include="@(OpennessWorkerV20PublishFiles)">
+        <RelativePath>openness-worker\V20\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>

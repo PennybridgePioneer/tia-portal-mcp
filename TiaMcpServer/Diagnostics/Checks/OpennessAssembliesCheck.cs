@@ -33,8 +33,8 @@ public sealed class OpennessAssembliesCheck : IDiagnosticCheck
                 Id,
                 Name,
                 DiagnosticStatus.Failed,
-                "No TIA Portal V21 installation was found.",
-                "Install TIA Portal V21 with the Openness option, or set TiaPortalV21Dir to the PublicAPI\\V21\\net48 folder.",
+                "No TIA Portal installation was found.",
+                "Install TIA Portal V20 or V21 with Openness, or set TiaPortalV20Dir/TiaPortalV21Dir to the matching PublicAPI folder.",
                 evidence);
         }
 
@@ -42,7 +42,11 @@ public sealed class OpennessAssembliesCheck : IDiagnosticCheck
         var source = result.OpennessSource ?? result.Source;
         var selectedCandidate = result.Candidates.First(candidate =>
             candidate.Path == path && candidate.Source == source);
+        var requiredAssemblies = selectedCandidate.Version == "V20"
+            ? TiaPortalInstallationLocator.RequiredAssembliesV20
+            : TiaPortalInstallationLocator.RequiredAssembliesV21;
         evidence["selectedPath"] = path;
+        evidence["selectedVersion"] = selectedCandidate.Version;
         evidence["selectedInstallationPath"] = selectedCandidate.InstallationPath;
         evidence["selectedSource"] = selectedCandidate.Source;
         evidence["apiDirectoryPresent"] = selectedCandidate.DirectoryPresent.ToString().ToLowerInvariant();
@@ -53,14 +57,14 @@ public sealed class OpennessAssembliesCheck : IDiagnosticCheck
                 Id,
                 Name,
                 DiagnosticStatus.Failed,
-                $"TIA Portal V21 is installed at {selectedCandidate.InstallationPath}, but its Openness API directory was not found at {path}.",
-                "Modify or reinstall TIA Portal V21 with the Openness option, or set TiaPortalV21Dir to a complete PublicAPI\\V21\\net48 folder.",
+                $"TIA Portal {selectedCandidate.Version} is installed at {selectedCandidate.InstallationPath}, but its Openness API directory was not found at {path}.",
+                "Modify or reinstall TIA Portal with the Openness option, or set TiaPortalV20Dir/TiaPortalV21Dir to a complete matching PublicAPI folder.",
                 evidence);
         }
 
         var missing = new List<string>();
 
-        foreach (var assembly in TiaPortalInstallationLocator.RequiredAssemblies)
+        foreach (var assembly in requiredAssemblies)
         {
             var assemblyPath = Path.Combine(path, assembly);
             var exists = _fileSystem.FileExists(assemblyPath);
@@ -79,7 +83,7 @@ public sealed class OpennessAssembliesCheck : IDiagnosticCheck
                 Name,
                 DiagnosticStatus.Failed,
                 $"Missing Openness assemblies: {string.Join(", ", missing)}.",
-                "Reinstall TIA Portal V21 with the Openness option, or set TiaPortalV21Dir to a complete PublicAPI\\V21\\net48 folder.",
+                "Reinstall TIA Portal with the Openness option, or set TiaPortalV20Dir/TiaPortalV21Dir to a complete matching PublicAPI folder.",
                 evidence);
         }
 

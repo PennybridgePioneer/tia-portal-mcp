@@ -1,8 +1,10 @@
 using TiaMcpServer.OpennessWorker.Openness.Infrastructure;
 using Siemens.Engineering;
 using Siemens.Engineering.HW;
-using Siemens.Engineering.HW.CommunicationConnections;
 using Siemens.Engineering.HW.Features;
+#if !TIA_V20_NO_COMM_CONNECTIONS
+using Siemens.Engineering.HW.CommunicationConnections;
+#endif
 using TiaMcpServer.Contracts.Network;
 using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.OpennessWorker.Openness.Project;
@@ -32,7 +34,13 @@ public static class NetworkObjectSelectorResolver
             NetworkObjectKinds.Node => ResolveNode(project, target),
             NetworkObjectKinds.Subnet => ResolveSubnet(project, target),
             NetworkObjectKinds.IoSystem => ResolveIoSystem(project, target),
+#if TIA_V20_NO_COMM_CONNECTIONS
+            NetworkObjectKinds.CommunicationConnection => NetworkObjectSelectionResult.Fail(
+                WorkerFailureCategories.TargetKindUnsupported,
+                "Communication connections are not supported by the V20 worker."),
+#else
             NetworkObjectKinds.CommunicationConnection => ResolveCommunicationConnection(project, target),
+#endif
             _ => NetworkObjectSelectionResult.Fail(
                 WorkerFailureCategories.TargetKindUnsupported,
                 $"Network object kind '{target.Kind ?? "(null)"}' is not supported by this inspector."),
@@ -355,6 +363,7 @@ public static class NetworkObjectSelectorResolver
             messages));
     }
 
+#if !TIA_V20_NO_COMM_CONNECTIONS
     private static NetworkObjectSelectionResult ResolveCommunicationConnection(
         ProjectBase project,
         NetworkObjectSelectorInfo target)
@@ -512,6 +521,7 @@ public static class NetworkObjectSelectorResolver
             evidence,
             messages));
     }
+#endif
 
     private static DeviceItemMatch MatchDeviceItem(ProjectBase project, NetworkObjectSelectorInfo target)
     {
@@ -660,6 +670,7 @@ public static class NetworkObjectSelectorResolver
         return null;
     }
 
+#if !TIA_V20_NO_COMM_CONNECTIONS
     private static Connection? ConnectionAt(ConnectionComposition connections, int index)
     {
         if (index < 0)
@@ -680,6 +691,7 @@ public static class NetworkObjectSelectorResolver
 
         return null;
     }
+#endif
 
     private static IEnumerable<NodeCandidate> EnumerateNodes(Device device)
     {

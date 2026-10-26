@@ -1,17 +1,15 @@
 using TiaMcpServer.OpennessWorker.Openness.Infrastructure;
 using Siemens.Engineering;
 using Siemens.Engineering.HW;
+#if !TIA_V20_NO_COMM_CONNECTIONS
 using Siemens.Engineering.HW.CommunicationConnections;
 using Siemens.Engineering.HW.Features;
+#endif
 using TiaMcpServer.Contracts.Network;
 using static TiaMcpServer.OpennessWorker.Openness.Network.NetworkOpennessRead;
 
 namespace TiaMcpServer.OpennessWorker.Openness.Network;
 
-/// <summary>
-/// Enumerates one device item's communication-connection composition exactly once and captures
-/// only the lightweight typed evidence needed for summaries and later exact resolution.
-/// </summary>
 public static class CommunicationConnectionReader
 {
     public static IReadOnlyList<CommunicationConnectionReadResult> Read(
@@ -20,6 +18,10 @@ public static class CommunicationConnectionReader
         IReadOnlyList<DeviceItemPathSegmentInfo> itemPath,
         List<string>? messages = null)
     {
+#if TIA_V20_NO_COMM_CONNECTIONS
+        messages?.Add("Communication connection inspection is not available in the V20 worker.");
+        return Array.Empty<CommunicationConnectionReadResult>();
+#else
         CommunicationManagement? communicationManagement;
         try
         {
@@ -58,8 +60,10 @@ public static class CommunicationConnectionReader
         }
 
         return results;
+#endif
     }
 
+#if !TIA_V20_NO_COMM_CONNECTIONS
     internal static bool TryReadConnectionType(
         Connection connection,
         out string? connectionType,
@@ -119,8 +123,7 @@ public static class CommunicationConnectionReader
 
             value = null;
             diagnostic =
-                $"Typed V21 reader for {connectionType}.{attributeName} returned "
-                + "a non-string value.";
+                $"Typed V21 reader for {connectionType}.{attributeName} returned a non-string value.";
             return false;
         }
         catch (Exception exception) when (OpennessExceptions.IsRecoverable(exception))
@@ -195,14 +198,7 @@ public static class CommunicationConnectionReader
             diagnostics.Add(diagnostic!);
         }
     }
-
-    private static void AddMessage(List<string>? messages, string? message)
-    {
-        if (messages is not null && !string.IsNullOrWhiteSpace(message))
-        {
-            messages.Add(message!);
-        }
-    }
+#endif
 }
 
 public sealed class CommunicationConnectionReadResult
@@ -214,6 +210,5 @@ public sealed class CommunicationConnectionReadResult
     }
 
     public int ConnectionIndex { get; }
-
     public CommunicationConnectionInfo Summary { get; }
 }

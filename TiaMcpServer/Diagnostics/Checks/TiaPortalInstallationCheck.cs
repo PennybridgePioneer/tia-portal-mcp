@@ -44,11 +44,13 @@ public sealed class TiaPortalInstallationCheck : IDiagnosticCheck
             evidence["selectedPath"] = result.SelectedPath;
             evidence["selectedInstallationPath"] = result.SelectedInstallationPath;
             evidence["selectedSource"] = result.Source;
+            var selectedCandidate = result.Candidates.FirstOrDefault(c => c.Path == result.SelectedPath && c.Source == result.Source);
+            var versionLabel = selectedCandidate?.Version is { Length: > 0 } version ? $" {version}" : string.Empty;
             return new DiagnosticCheckResult(
                 Id,
                 Name,
                 DiagnosticStatus.Passed,
-                $"TIA Portal V21 detected at {result.SelectedInstallationPath} via {result.Source}.",
+                $"TIA Portal{versionLabel} detected at {result.SelectedInstallationPath} via {result.Source}.",
                 null,
                 evidence);
         }
@@ -57,8 +59,8 @@ public sealed class TiaPortalInstallationCheck : IDiagnosticCheck
             Id,
             Name,
             DiagnosticStatus.Failed,
-            "TIA Portal V21 installation was not found in any inspected location.",
-            "Install TIA Portal V21, set TiaPortalV21Dir to its PublicAPI\\V21\\net48 folder, or set TiaPortalLocation to the Portal V21 installation root.",
+            "TIA Portal installation was not found in any inspected location.",
+            "Install TIA Portal V20 or V21, set TiaPortalV20Dir/TiaPortalV21Dir to the matching PublicAPI folder, or set TiaPortalLocation to the TIA Portal installation root.",
             evidence);
     }
 }

@@ -6,7 +6,6 @@ public sealed class OpennessWorkerCheck : IDiagnosticCheck
 {
     internal static readonly string[] RequiredCompanionFiles =
     {
-        "TiaMcpServer.OpennessWorker.exe.config",
         "TiaMcpServer.Contracts.dll",
         "Microsoft.Bcl.AsyncInterfaces.dll",
         "System.Buffers.dll",
@@ -34,7 +33,7 @@ public sealed class OpennessWorkerCheck : IDiagnosticCheck
 
     public DiagnosticCheckResult Run()
     {
-        var result = OpennessWorkerLocator.Locate(_appInfo.BaseDirectory, _fileSystem);
+        var result = OpennessWorkerLocator.LocateAny(_appInfo.BaseDirectory, _fileSystem);
         var evidence = Evidence.Empty();
 
         for (int i = 0; i < result.Candidates.Count; i++)
@@ -73,8 +72,11 @@ public sealed class OpennessWorkerCheck : IDiagnosticCheck
                 evidence);
         }
 
+        var workerConfigFile = Path.GetFileName(path) + ".config";
+        var requiredFiles = RequiredCompanionFiles.Concat(new[] { workerConfigFile }).ToArray();
+
         var missingCompanionFiles = new List<string>();
-        foreach (var companionFile in RequiredCompanionFiles)
+        foreach (var companionFile in requiredFiles)
         {
             var companionPath = Path.Combine(directory, companionFile);
             var exists = _fileSystem.FileExists(companionPath);

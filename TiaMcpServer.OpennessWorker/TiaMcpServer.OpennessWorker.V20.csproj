@@ -1,0 +1,59 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+	<OutputType>Exe</OutputType>
+	<TargetFramework>net48</TargetFramework>
+	<Nullable>enable</Nullable>
+	<ImplicitUsings>enable</ImplicitUsings>
+	<LangVersion>latest</LangVersion>
+	<GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+	<AssemblyName>TiaMcpServer.OpennessWorker.V20</AssemblyName>
+	<BaseOutputPath>bin\V20\</BaseOutputPath>
+	<BaseIntermediateOutputPath>obj\V20\</BaseIntermediateOutputPath>
+	<TiaOpennessStubReferenceDir>$(MSBuildProjectDirectory)\..\ref</TiaOpennessStubReferenceDir>
+	<UseTiaPortalReferenceStubs Condition="'$(UseTiaPortalReferenceStubs)' == '' and Exists('$(TiaPortalV20Dir)\Siemens.Engineering.dll') and Exists('$(TiaPortalV20Dir)\Siemens.Engineering.Hmi.dll')">false</UseTiaPortalReferenceStubs>
+	<UseTiaPortalReferenceStubs Condition="'$(UseTiaPortalReferenceStubs)' == ''">true</UseTiaPortalReferenceStubs>
+	<TiaOpennessReferenceDir Condition="'$(UseTiaPortalReferenceStubs)' == 'true'">$(TiaOpennessStubReferenceDir)</TiaOpennessReferenceDir>
+	<TiaOpennessReferenceDir Condition="'$(UseTiaPortalReferenceStubs)' != 'true'">$(TiaPortalV20Dir)</TiaOpennessReferenceDir>
+	<TiaOpennessReferenceVersionSubDir Condition="'$(UseTiaPortalReferenceStubs)' == 'true'">V20\</TiaOpennessReferenceVersionSubDir>
+	<TiaOpennessReferenceVersionSubDir Condition="'$(UseTiaPortalReferenceStubs)' != 'true'"></TiaOpennessReferenceVersionSubDir>
+	<DefineConstants>$(DefineConstants);TIA_V20_NO_COMM_CONNECTIONS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+	<Compile Remove="bin\**\*.cs;obj\**\*.cs" />
+	<EmbeddedResource Remove="bin\**\*;obj\**\*" />
+	<None Remove="bin\**\*;obj\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<PackageReference Include="System.Text.Json" Version="10.0.13" />
+	<PackageReference Include="System.ValueTuple" Version="4.6.2" />
+	<ProjectReference Include="..\TiaMcpServer.Contracts\TiaMcpServer.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<None Include="$(NuGetPackageRoot)system.valuetuple\4.6.2\lib\net47\System.ValueTuple.dll" Link="System.ValueTuple.dll" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<EmbeddedResource Include="Openness\ObFixtures\*.xml" LogicalName="TiaMcpServer.ObFixtures.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<Reference Include="Siemens.Engineering">
+	  <HintPath>$(TiaOpennessReferenceDir)\$(TiaOpennessReferenceVersionSubDir)Siemens.Engineering.dll</HintPath>
+	  <Private>False</Private>
+	  <ExcludeAssets>runtime</ExcludeAssets>
+	</Reference>
+	<Reference Include="Siemens.Engineering.Hmi">
+	  <HintPath>$(TiaOpennessReferenceDir)\$(TiaOpennessReferenceVersionSubDir)Siemens.Engineering.Hmi.dll</HintPath>
+	  <Private>False</Private>
+	  <ExcludeAssets>runtime</ExcludeAssets>
+	</Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateTiaOpennessReferences" BeforeTargets="ResolveReferences">
+	<Message Importance="High" Text="TIA Openness compile references (V20): $(TiaOpennessReferenceDir) (UseTiaPortalReferenceStubs=$(UseTiaPortalReferenceStubs))" />
+	<Error Condition="!Exists('$(TiaOpennessReferenceDir)\$(TiaOpennessReferenceVersionSubDir)Siemens.Engineering.dll') or !Exists('$(TiaOpennessReferenceDir)\$(TiaOpennessReferenceVersionSubDir)Siemens.Engineering.Hmi.dll')" Text="TIA Portal V20 Openness reference assemblies were not found in '$(TiaOpennessReferenceDir)'. Install TIA Portal V20, set TiaPortalV20Dir, or build with /p:UseTiaPortalReferenceStubs=true for CI/package builds." />
+  </Target>
+</Project>

@@ -5,6 +5,7 @@ namespace TiaMcpServer.Worker;
 
 
 public sealed record TiaPortalCandidate(
+    string Version,
     string Path,
     string InstallationPath,
     string Source,
@@ -36,18 +37,36 @@ public sealed record TiaPortalInstallationResult(
 /// </summary>
 public static class TiaPortalInstallationLocator
 {
+    // Backward-compatible alias used by existing diagnostics tests.
     public static readonly string[] RequiredAssemblies =
     {
         "Siemens.Engineering.Base.dll",
         "Siemens.Engineering.Step7.dll"
     };
 
+    public static readonly string[] RequiredAssembliesV21 =
+    {
+        "Siemens.Engineering.Base.dll",
+        "Siemens.Engineering.Step7.dll"
+    };
+
+    public static readonly string[] RequiredAssembliesV20 =
+    {
+        "Siemens.Engineering.dll"
+    };
+
     private const string TiaPortalV21DirEnvironmentVariable = "TiaPortalV21Dir";
+    private const string TiaPortalV20DirEnvironmentVariable = "TiaPortalV20Dir";
     private const string TiaPortalLocationEnvironmentVariable = "TiaPortalLocation";
+    private const string TiaPortalV20RegistrySubKey =
+        @"SOFTWARE\Siemens\Automation\InstalledApps\Totally Integrated Automation Portal V20";
     private const string TiaPortalV21RegistrySubKey =
         @"SOFTWARE\Siemens\Automation\InstalledApps\Totally Integrated Automation Portal V21";
     private const string RegistryInstallValueName = "INSTALLPATH";
+    private const string PublicApiV20Suffix = @"PublicAPI\V20";
     private const string PublicApiSuffix = @"PublicAPI\V21\net48";
+    private const string StandardPortalV20InstallPath =
+        @"C:\Program Files\Siemens\Automation\Portal V20";
     private const string StandardPortalInstallPath =
         @"C:\Program Files\Siemens\Automation\Portal V21";
 
@@ -58,25 +77,47 @@ public static class TiaPortalInstallationLocator
     {
         var candidates = new List<TiaPortalCandidate>();
 
+        var envV20Dir = env.Get(TiaPortalV20DirEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(envV20Dir))
+        {
+            var path = envV20Dir!.Trim().Trim('"');
+            AddCandidate(candidates, fileSystem, "V20", path, path, $"env:{TiaPortalV20DirEnvironmentVariable}", RequiredAssembliesV20);
+        }
+
         var envV21Dir = env.Get(TiaPortalV21DirEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(envV21Dir))
         {
             var path = envV21Dir!.Trim().Trim('"');
-            AddCandidate(candidates, fileSystem, path, path, $"env:{TiaPortalV21DirEnvironmentVariable}");
+            AddCandidate(candidates, fileSystem, "V21", path, path, $"env:{TiaPortalV21DirEnvironmentVariable}", RequiredAssembliesV21);
         }
 
         var envLocation = env.Get(TiaPortalLocationEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(envLocation))
         {
             var root = envLocation!.Trim().Trim('"');
-            var path = Path.Combine(root, PublicApiSuffix);
-            AddCandidate(candidates, fileSystem, root, path, $"env:{TiaPortalLocationEnvironmentVariable}");
+            var v20Path = Path.Combine(root, PublicApiV20Suffix);
+            AddCandidate(candidates, fileSystem, "V20", root, v20Path, $"env:{TiaPortalLocationEnvironmentVariable}", RequiredAssembliesV20);
+            var v21Path = Path.Combine(root, PublicApiSuffix);
+            AddCandidate(candidates, fileSystem, "V21", root, v21Path, $"env:{TiaPortalLocationEnvironmentVariable}", RequiredAssembliesV21);
         }
 
         if (OperatingSystem.IsWindows())
         {
             foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
             {
+                var installPathV20 = registry.GetStringValue(
+                    RegistryHive.LocalMachine,
+                    view,
+                    TiaPortalV20RegistrySubKey,
+                    RegistryInstallValueName);
+
+                if (!string.IsNullOrWhiteSpace(installPathV20))
+                {
+                    var root = installPathV20!.Trim().Trim('"');
+                    var path = Path.Combine(root, PublicApiV20Suffix);
+                    AddCandidate(candidates, fileSystem, "V20", root, path, $"registry:{view}", RequiredAssembliesV20);
+                }
+
                 var installPath = registry.GetStringValue(
                     RegistryHive.LocalMachine,
                     view,
@@ -87,7 +128,7 @@ public static class TiaPortalInstallationLocator
                 {
                     var root = installPath!.Trim().Trim('"');
                     var path = Path.Combine(root, PublicApiSuffix);
-                    AddCandidate(candidates, fileSystem, root, path, $"registry:{view}");
+                    AddCandidate(candidates, fileSystem, "V21", root, path, $"registry:{view}", RequiredAssembliesV21);
                 }
             }
         }
@@ -95,9 +136,20 @@ public static class TiaPortalInstallationLocator
         AddCandidate(
             candidates,
             fileSystem,
+            "V20",
+            StandardPortalV20InstallPath,
+            Path.Combine(StandardPortalV20InstallPath, PublicApiV20Suffix),
+            "default",
+            RequiredAssembliesV20);
+
+        AddCandidate(
+            candidates,
+            fileSystem,
+            "V21",
             StandardPortalInstallPath,
             Path.Combine(StandardPortalInstallPath, PublicApiSuffix),
-            "default");
+            "default",
+            RequiredAssembliesV21);
 
         var selected = candidates.FirstOrDefault(c => c.InstallationPresent);
         var selectedOpenness = candidates.FirstOrDefault(c => c.AssembliesPresent);
@@ -115,9 +167,11 @@ public static class TiaPortalInstallationLocator
     private static void AddCandidate(
         List<TiaPortalCandidate> candidates,
         IFileSystemService fileSystem,
+        string version,
         string installationPath,
         string apiPath,
-        string source)
+        string source,
+        IReadOnlyList<string> requiredAssemblies)
     {
         var missing = new List<string>();
         var installationPresent = fileSystem.DirectoryExists(installationPath);
@@ -125,7 +179,7 @@ public static class TiaPortalInstallationLocator
         var assembliesPresent = directoryPresent;
         if (directoryPresent)
         {
-            foreach (var assembly in RequiredAssemblies)
+            foreach (var assembly in requiredAssemblies)
             {
                 if (!fileSystem.FileExists(Path.Combine(apiPath, assembly)))
                 {
@@ -136,10 +190,11 @@ public static class TiaPortalInstallationLocator
         }
         else
         {
-            missing.AddRange(RequiredAssemblies);
+            missing.AddRange(requiredAssemblies);
         }
 
         candidates.Add(new TiaPortalCandidate(
+            version,
             apiPath,
             installationPath,
             source,

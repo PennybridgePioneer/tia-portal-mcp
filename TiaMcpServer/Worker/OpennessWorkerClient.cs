@@ -67,6 +67,7 @@ public class OpennessWorkerClient : IDisposable
     private readonly SemaphoreSlim _bindingOperationGate = new(1, 1);
     private readonly AsyncLocal<BindingOperationContext?> _bindingOperationContext = new();
     private PersistentWorkerTransport? _transport;
+    private string? _transportWorkerPath;
     private bool _disposed;
     private (ProjectBindingSnapshot Binding, WorkerSessionIdentity Identity)? _emptyPortalRecovery;
 
@@ -2279,7 +2280,7 @@ public class OpennessWorkerClient : IDisposable
             // Exactly one transport request per call: SendAsync neither loops nor retries: on any
             // failure below the transport already killed/will-recreate its process on the NEXT
             // call, and this method never re-invokes SendAsync for the request that just failed.
-            var response = await GetOrCreateTransport().SendAsync(request).ConfigureAwait(false);
+            var response = await GetOrCreateTransport(request).SendAsync(request).ConfigureAwait(false);
             var warnings = CapWarnings(response.Warnings);
             foreach (var warning in warnings)
             {
@@ -2374,10 +2375,21 @@ public class OpennessWorkerClient : IDisposable
             // Broken pipe (IOException), a crashed/null response or a failed process launch
             // (InvalidOperationException), or malformed/protocol-desynced JSON (JsonException) —
             // all mean the worker cannot be trusted to have completed the request as sent.
+            _logger?.LogError(ex, "TIA Openness worker crashed for method {Method}.", request.Method);
             InvalidateVerifiedBinding("the Openness worker crashed or its protocol stream was lost");
+
+            var crashDetail = ex switch
+            {
+                InvalidOperationException => ex.Message,
+                IOException => $"Worker I/O error: {ex.Message}",
+                JsonException => $"Worker protocol error: {ex.Message}",
+                _ => $"{ex.GetType().Name}: {ex.Message}"
+            };
+
             return WorkerCallResult.Fail(
                 WorkerFailureCategories.WorkerCrashed,
-                WorkerTransportFailureGuidance.CrashGuidance(request.Method)) with
+                WorkerTransportFailureGuidance.CrashGuidance(request.Method),
+                new[] { crashDetail }) with
             {
                 DispatchState = WorkerDispatchState.Unknown
             };
@@ -2395,7 +2407,7 @@ public class OpennessWorkerClient : IDisposable
     internal void InvalidateRejectedLifecycleContext()
         => InvalidateVerifiedBinding("the lifecycle verification returned contradictory owner evidence");
 
-    private PersistentWorkerTransport GetOrCreateTransport()
+    private PersistentWorkerTransport GetOrCreateTransport(WorkerRequest request)
     {
         lock (_transportLock)
         {
@@ -2404,12 +2416,21 @@ public class OpennessWorkerClient : IDisposable
                 throw new PersistentWorkerTransport.WorkerTransportDisposedException();
             }
 
+            var projectPath = request.ProjectPath ?? BindingSnapshot.ProjectPath;
+            var workerPath = _workerExecutablePathOverride ?? LocateWorkerExecutable(projectPath);
             var workerArgs = $"--access-mode {McpAccessModeNames.ToName(_accessPolicy.Mode)}";
-            _transport ??= new PersistentWorkerTransport(
-                _workerExecutablePathOverride ?? LocateWorkerExecutable(),
-                _requestTimeout,
-                _logger,
-                workerArgs);
+
+            if (_transport is null || !string.Equals(_transportWorkerPath, workerPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _transport?.Dispose();
+                _transport = new PersistentWorkerTransport(
+                    workerPath,
+                    _requestTimeout,
+                    _logger,
+                    workerArgs);
+                _transportWorkerPath = workerPath;
+            }
+
             return _transport;
         }
     }
@@ -2421,6 +2442,7 @@ public class OpennessWorkerClient : IDisposable
             _disposed = true;
             _transport?.Dispose();
             _transport = null;
+            _transportWorkerPath = null;
         }
     }
 
@@ -2486,8 +2508,8 @@ public class OpennessWorkerClient : IDisposable
             + WarningTruncationTrailer;
     }
 
-    private static string LocateWorkerExecutable()
-        => OpennessWorkerLocator.LocateOrThrow(AppContext.BaseDirectory, FileSystemService.Instance);
+    private static string LocateWorkerExecutable(string? projectPath)
+        => OpennessWorkerLocator.LocateOrThrow(AppContext.BaseDirectory, FileSystemService.Instance, projectPath);
 
 }
 

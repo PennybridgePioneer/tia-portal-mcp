@@ -152,6 +152,7 @@ public static class ProjectMetadataReader
     {
         var result = new ProjectCompilationSettingsInfo();
 
+#if !TIA_V20_NO_COMM_CONNECTIONS
         result.IsSimulationDuringBlockCompilationEnabled = ReadProviderSetting(
             "PlcSimulationSettingsProvider",
             "IsSimulationDuringBlockCompilationEnabled",
@@ -161,6 +162,10 @@ public static class ProjectMetadataReader
             "VirtualPlcSettingsProvider",
             "IsVirtualPlcDuringBlockCompilationEnabled",
             () => project.GetService<VirtualPlcSettingsProvider>()?.IsVirtualPlcDuringBlockCompilationEnabled);
+#else
+        Console.Error.WriteLine("PlcSimulationSettingsProvider is not available in the V20 worker; IsSimulationDuringBlockCompilationEnabled is not reported.");
+        Console.Error.WriteLine("VirtualPlcSettingsProvider is not available in the V20 worker; IsVirtualPlcDuringBlockCompilationEnabled is not reported.");
+#endif
 
         // Both values null with no provider available is a genuine "nothing to report" state;
         // but the section is still returned (empty) so the caller sees the schema, and each

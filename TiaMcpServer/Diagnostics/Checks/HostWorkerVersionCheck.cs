@@ -22,7 +22,7 @@ public sealed class HostWorkerVersionCheck : IDiagnosticCheck
         var hostVersion = _appInfo.HostVersion;
         evidence["hostVersion"] = hostVersion;
 
-        var workerLocation = OpennessWorkerLocator.Locate(_appInfo.BaseDirectory, _fileSystem);
+        var workerLocation = OpennessWorkerLocator.LocateAny(_appInfo.BaseDirectory, _fileSystem);
         if (!workerLocation.Found || workerLocation.SelectedPath is null)
         {
             return new DiagnosticCheckResult(

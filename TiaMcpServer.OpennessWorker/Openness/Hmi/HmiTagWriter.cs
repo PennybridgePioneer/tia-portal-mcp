@@ -38,7 +38,9 @@ public static class HmiTagWriter
         if (write.DataType is not null) Set(outcome, "DataType", () => tag.DataType = write.DataType);
         if (write.AcquisitionCycle is not null) Set(outcome, "AcquisitionCycle", () => tag.AcquisitionCycle = write.AcquisitionCycle);
         if (write.Comment is not null) Set(outcome, "Comment", () => HmiTextMapper.Write(tag.Comment, write.Comment));
+#if !TIA_V20_NO_COMM_CONNECTIONS
         if (write.DisplayName is not null) Set(outcome, "DisplayName", () => HmiTextMapper.Write(tag.DisplayName, write.DisplayName));
+#endif
         outcome.FailedProperty = null;
     }
 }

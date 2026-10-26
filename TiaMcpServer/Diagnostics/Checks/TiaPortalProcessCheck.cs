@@ -8,6 +8,7 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
     {
         "Siemens.Automation.Portal",
         "TIA.Portal",
+        "Portal.V20",
         "Portal.V21",
         "Siemens.Simulation.Portal"
     };
@@ -45,7 +46,7 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
                 Name,
                 DiagnosticStatus.Warning,
                 "Not running on Windows; TIA Portal process detection was skipped.",
-                "Start TIA Portal V21 before operations that attach to an open project.",
+                "Start TIA Portal V20/V21 before operations that attach to an open project.",
                 evidence);
         }
 
@@ -85,7 +86,7 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
                 DiagnosticStatus.Warning,
                 message,
                 _hasConfiguredProjectBinding
-                    ? "Call bind_project with the configured .ap21 project's path after confirming it is open in exactly one TIA Portal process."
+                    ? "Call bind_project with the configured .ap20/.ap21 project's path after confirming it is open in exactly one TIA Portal process."
                     : "Call bind_project with the intended already-open project's exact projectPath, or configure --project, before using project tools.",
                 evidence);
         }
@@ -95,7 +96,7 @@ public sealed class TiaPortalProcessCheck : IDiagnosticCheck
             Name,
             DiagnosticStatus.Warning,
             "No running TIA Portal instance was detected.",
-            "Start TIA Portal V21 before operations that attach to an open project. This is informational; the installation can still be valid.",
+            "Start TIA Portal V20/V21 before operations that attach to an open project. This is informational; the installation can still be valid.",
             evidence);
     }
 }
