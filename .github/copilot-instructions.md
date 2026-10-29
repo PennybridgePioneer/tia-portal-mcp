@@ -42,3 +42,4 @@ This solution contains projects targeting .NET 10 and .NET Framework 4.8.
 - Auf dem Zielrechner ist nur TIA Portal V20 installiert; wenn der allgemeine Worker (V21) gestartet wird, crasht er wegen fehlender Siemens.Engineering.Base v21. Außerdem ist 6388 die TIA-Hauptinstanz und 10952 nur ein Such-/Ersetzungs-Hintergrundprozess.
 - Auf der aktuellen Maschine des Users ist TIA nicht installiert; Worker-Livetests sollen dort nicht durchgeführt werden.
 - V20 soll vorerst mit reduziertem Funktionsumfang gebaut werden; CommunicationConnections-abhängige Features dürfen für V20 deaktiviert/fallbacked werden.
+- Im Projekt liegt die Openness-Dokumentation bereits vor; für API-Fragen soll zuerst die lokale Projektdokumentation verwendet werden.
