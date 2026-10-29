@@ -138,16 +138,11 @@ public static class OpennessWorkerLocator
     {
         if (!TrySelectWorkerVersion(projectPath, out var workerVersion))
         {
-            var anyResult = LocateAny(baseDirectory, fileSystem);
-            if (anyResult.Found && anyResult.SelectedPath is not null)
-            {
-                return anyResult.SelectedPath;
-            }
-
             throw new InvalidOperationException(
-                "TIA worker version could not be determined from project path and no worker executable was found. " +
-                "Use an absolute .ap20/.amc20 or .ap21/.amc21 path (for example via bind_project or configured project path) before project operations, " +
-                "or ensure the openness-worker folder contains the V20/V21 worker binaries.");
+                "TIA worker version could not be determined. " +
+                "Provide an absolute .ap20/.amc20 or .ap21/.amc21 path " +
+                "(for example via bind_project or configured project path), " +
+                "or set an explicit worker version override (V20/V21).");
         }
 
         var result = Locate(baseDirectory, fileSystem, projectPath);
@@ -159,7 +154,7 @@ public static class OpennessWorkerLocator
         var executableName = SelectWorkerExecutableName(workerVersion);
         var inspected = string.Join("; ", result.Candidates.Select(c => c.Path));
         throw new FileNotFoundException(
-            $"TIA Openness worker executable for {workerVersion} was not found. Build the solution and ensure the openness-worker folder is beside the MCP server executable. Inspected: {inspected}",
+            $"TIA Openness worker executable for {workerVersion} was not found. Inspected: {inspected}",
             result.Candidates.FirstOrDefault()?.Path ?? executableName);
     }
 }
