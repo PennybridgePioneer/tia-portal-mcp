@@ -1,44 +1,31 @@
+using TiaMcpServer.Tests.TestSupport;
 namespace TiaMcpServer.Tests.Network;
 
 using Xunit;
 
 /// <summary>
 /// Task 5, Step 1: source-contract tests for the worker's dispatch of the three Phase 4 subnet
-/// lifecycle operations in <c>TiaMcpServer.OpennessWorker/Program.cs</c>. Reads the production
+/// lifecycle operations in <c>Program.NetworkDispatch.cs</c>. Reads the production
 /// source text rather than exercising the dispatch switch at runtime, for the same reason given on
 /// <see cref="NetworkSubnetLifecycleWorkerServiceContractTests"/>.
 /// </summary>
 public class NetworkSubnetLifecycleWorkerDispatchTests
 {
     private static string ProgramSource => File.ReadAllText(
-        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Program.cs"));
+        RepositoryFiles.Path("TiaMcpServer.OpennessWorker", "Program.cs"))
+        + File.ReadAllText(RepositoryFiles.Path("TiaMcpServer.OpennessWorker", "Program.NetworkDispatch.cs"));
 
     [Fact]
     public void WorkerProgram_DispatchesAllThreeSubnetLifecycleOperationsToTheirOwnHandlers()
     {
         var source = ProgramSource;
-        Assert.Contains("\"create_subnet\" => CreateSubnet(request),", source, StringComparison.Ordinal);
-        Assert.Contains("\"update_subnet\" => UpdateSubnet(request),", source, StringComparison.Ordinal);
-        Assert.Contains("\"delete_subnet\" => DeleteSubnet(request),", source, StringComparison.Ordinal);
+        Assert.Contains("\"create_subnet\" => NetworkWorkerDispatch.CreateSubnet(request),", source, StringComparison.Ordinal);
+        Assert.Contains("\"update_subnet\" => NetworkWorkerDispatch.UpdateSubnet(request),", source, StringComparison.Ordinal);
+        Assert.Contains("\"delete_subnet\" => NetworkWorkerDispatch.DeleteSubnet(request),", source, StringComparison.Ordinal);
 
-        Assert.Contains("private static WorkerResponse CreateSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
-        Assert.Contains("private static WorkerResponse UpdateSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
-        Assert.Contains("private static WorkerResponse DeleteSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void WorkerProgram_EachSubnetLifecycleHandlerRequiresConfirm()
-    {
-        var source = ProgramSource;
-        var createBody = ExtractMethodBody(source, "CreateSubnet");
-        var updateBody = ExtractMethodBody(source, "UpdateSubnet");
-        var deleteBody = ExtractMethodBody(source, "DeleteSubnet");
-
-        foreach (var body in new[] { createBody, updateBody, deleteBody })
-        {
-            Assert.Contains("if (!request.Confirm)", body, StringComparison.Ordinal);
-            Assert.Contains("WorkerFailureCategories.ValidationError", body, StringComparison.Ordinal);
-        }
+        Assert.Contains("public static WorkerResponse CreateSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
+        Assert.Contains("public static WorkerResponse UpdateSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
+        Assert.Contains("public static WorkerResponse DeleteSubnet(WorkerRequest request)", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -96,45 +83,28 @@ public class NetworkSubnetLifecycleWorkerDispatchTests
     }
 
     [Fact]
-    public void WorkerProgram_UsesASharedHelperForTheRepeatedSessionAndProjectRequirement()
+    public void WorkerProgram_SubnetLifecycleUsesCommonActiveContextAndAnyEngineeringRoot()
     {
         var source = ProgramSource;
 
-        // The three method-name strings stay explicit in the dispatch switch and (already, from
-        // Task 3) the policy catalog — only the repeated session/project plumbing is shared.
-        var helperOccurrences = CountOccurrences(source, "WithSubnetLifecycleProject(request,");
-        Assert.Equal(3, helperOccurrences);
-        Assert.Contains("private static WorkerResponse WithSubnetLifecycleProject(", source, StringComparison.Ordinal);
-        Assert.Contains(
-            "WithSession(request, session =>",
-            ExtractMethodBody(source, "WithSubnetLifecycleProject"),
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("WithSubnetLifecycleProject(", source, StringComparison.Ordinal);
         Assert.Contains(
             "_sharedSession.EnsureConnected(request.ProjectPath);",
             ExtractMethodBody(source, "WithSession"),
             StringComparison.Ordinal);
-        Assert.Contains("session.TiaPortal", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
         // Subnet lifecycle runs on any container's ProjectBase root (local sessions included).
-        Assert.DoesNotContain("RequireStandaloneOwner", ExtractMethodBody(source, "WithSubnetLifecycleProject"), StringComparison.Ordinal);
         foreach (var handler in new[] { "CreateSubnet", "UpdateSubnet", "DeleteSubnet" })
-            Assert.Equal(1, CountOccurrences(ExtractMethodBody(source, handler), "session.EngineeringRoot!,"));
-    }
-
-    private static int CountOccurrences(string source, string value)
-    {
-        var count = 0;
-        var startIndex = 0;
-        while ((startIndex = source.IndexOf(value, startIndex, StringComparison.Ordinal)) >= 0)
         {
-            count++;
-            startIndex += value.Length;
+            var body = ExtractMethodBody(source, handler);
+            Assert.Equal(1, RepositoryFiles.CountOccurrences(body, "WithActiveContext(request,"));
+            Assert.Equal(1, RepositoryFiles.CountOccurrences(body, "session.EngineeringRoot!,"));
+            Assert.Contains("session.TiaPortal!", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("RequireStandaloneOwner", body, StringComparison.Ordinal);
         }
-
-        return count;
     }
 
     /// <summary>
-    /// Extracts the body of a private static method named <paramref name="methodName"/> by finding
+    /// Extracts the body of a static dispatch or shared helper method named <paramref name="methodName"/> by finding
     /// its declaration and the next top-level method declaration (or class-closing brace region)
     /// after it. Good enough for these structural assertions without a full C# parser.
     /// </summary>
@@ -147,9 +117,10 @@ public class NetworkSubnetLifecycleWorkerDispatchTests
         // ("MethodName(someArg);"), which share the same "MethodName(" substring.
         var declarationIndex = -1;
         var markerLength = 0;
+        foreach (var prefix in new[] { "private", "public" })
         foreach (var returnType in KnownReturnTypes)
         {
-            var marker = $"private static {returnType} {methodName}(";
+            var marker = $"{prefix} static {returnType} {methodName}(";
             var candidateIndex = source.IndexOf(marker, StringComparison.Ordinal);
             if (candidateIndex >= 0)
             {
@@ -159,27 +130,14 @@ public class NetworkSubnetLifecycleWorkerDispatchTests
             }
         }
 
-        Assert.True(declarationIndex >= 0, $"Expected a declaration of '{methodName}' in Program.cs.");
+        Assert.True(declarationIndex >= 0, $"Expected a declaration of '{methodName}' in the worker dispatch source.");
 
-        var nextMethodIndex = source.IndexOf(
-            "\n    private static",
-            declarationIndex + markerLength,
-            StringComparison.Ordinal);
-        var end = nextMethodIndex >= 0 ? nextMethodIndex : source.Length;
+        var nextMethod = System.Text.RegularExpressions.Regex.Match(
+            source[(declarationIndex + markerLength)..], @"\n +(?:private|public) static");
+        var end = nextMethod.Success
+            ? declarationIndex + markerLength + nextMethod.Index
+            : source.Length;
 
         return source[declarationIndex..end];
-    }
-
-    private static string FindRepositoryFile(params string[] segments)
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.slnx")))
-            {
-                return Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
-            }
-        }
-
-        throw new InvalidOperationException("Could not locate the repository root.");
     }
 }

@@ -8,7 +8,6 @@ using TiaMcpServer.Contracts.Project;
 using TiaMcpServer.Contracts.Safety;
 using TiaMcpServer.Cursors;
 using TiaMcpServer.Network;
-using TiaMcpServer.ProjectLifecycle;
 using TiaMcpServer.ProjectTree;
 using TiaMcpServer.Safety;
 using TiaMcpServer.Safety.Pipeline;
@@ -151,12 +150,7 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
 
         var binding = new ProjectSessionBinding(skipHardwarePreverification ? startupProjectPath : null);
         var accessPolicy = new OperationAccessPolicy(accessMode);
-        var workerClient = new OpennessWorkerClient(
-            binding,
-            logger: null,
-            workerExecutablePath: FakeWorkerLocator.Locate(),
-            requestTimeout: requestTimeout,
-            accessPolicy: accessPolicy);
+        var workerClient = FakeWorkerClients.Create(accessPolicy.Mode, binding: binding, requestTimeout: requestTimeout);
 
         var collection = new ServiceCollection();
         collection.AddLogging();
@@ -168,6 +162,23 @@ internal sealed class McpProtocolTestHarness : IAsyncDisposable
             new OpennessWriteBindingGate(sp.GetRequiredService<OpennessWorkerClient>()),
             new JsonlWriteAuditSink(auditDirectory), WriteGuardRegistration.ProductionCatalog(), TimeProvider.System));
         collection.AddSingleton(_ => AuthenticatedCursorProtector.CreateProcessScoped());
+        collection.AddSingleton(sp => new HardwarePageCursorCodec(
+            sp.GetRequiredService<AuthenticatedCursorProtector>()));
+        collection.AddSingleton(sp => new NetworkObjectPageCursorCodec(
+            sp.GetRequiredService<AuthenticatedCursorProtector>()));
+        collection.AddSingleton(sp => new HardwarePageProjector(
+            sp.GetRequiredService<HardwarePageCursorCodec>()));
+        collection.AddSingleton(sp => new HardwarePaginationCoordinator(
+            sp.GetRequiredService<OpennessWorkerClient>(),
+            sp.GetRequiredService<HardwarePageCursorCodec>(),
+            sp.GetRequiredService<HardwarePageProjector>()));
+        collection.AddSingleton(sp => new NetworkObjectPaginationCoordinator(
+            sp.GetRequiredService<OpennessWorkerClient>(),
+            sp.GetRequiredService<NetworkObjectPageCursorCodec>()));
+        collection.AddSingleton(sp => new NetworkReadOperationExecutor(
+            sp.GetRequiredService<OpennessWorkerClient>(),
+            sp.GetRequiredService<HardwarePaginationCoordinator>(),
+            sp.GetRequiredService<NetworkObjectPaginationCoordinator>()));
         collection.AddSingleton(sp => new ProjectTreeCursorCodec(
             sp.GetRequiredService<AuthenticatedCursorProtector>()));
         collection.AddSingleton(sp => new TiaMcpServer.Hmi.HmiPageCursorCodec(

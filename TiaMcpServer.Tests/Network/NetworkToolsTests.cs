@@ -1,6 +1,7 @@
 using TiaMcpServer.Contracts.Project;
 using TiaMcpServer.Contracts.Safety;
 using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.Cursors;
 using TiaMcpServer.Json;
 using TiaMcpServer.Network;
 using TiaMcpServer.OperationBatches;
@@ -30,7 +31,7 @@ public class NetworkToolsTests
         using var audit = new TempAuditDirectory();
         Directory.CreateDirectory(audit.Path);
         using var requests = new FakeWorkerRequestLog(audit.Path);
-        using var client = CreateClient();
+        using var client = FakeWorkerClients.Create();
         var name = new string('n', length);
         var operation = new NetworkOperationRequest { OperationId = "id", Operation = name };
 
@@ -38,7 +39,7 @@ public class NetworkToolsTests
 
         Assert.True(result.IsError);
         var text = ReadText(result);
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.Equal(CanonicalJson.Serialize(root), text);
         Assert.Equal("validation_error", root.GetProperty("error").GetProperty("category").GetString());
         Assert.True(text.Length < 6000);
@@ -77,8 +78,10 @@ public class NetworkToolsTests
         OpennessWorkerClient? client,
         NetworkOperationRequest[] operations)
     {
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client!, protector);
         var task = RequiredToolMethod("NetworkReadTools", "NetworkRead")
-            .Invoke(null, new object?[] { client, operations, CancellationToken.None }) as Task<CallToolResult>;
+            .Invoke(null, new object?[] { client, executor, operations, CancellationToken.None }) as Task<CallToolResult>;
         Assert.NotNull(task);
         return await task!;
     }
@@ -86,8 +89,6 @@ public class NetworkToolsTests
     private static string ReadText(CallToolResult result)
         => Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 
-    private static JsonElement ReadStructured(CallToolResult result)
-        => Assert.IsType<JsonElement>(result.StructuredContent);
 
     private static async Task<CallToolResult> NetworkWrite(
         OpennessWorkerClient? client,
@@ -101,19 +102,10 @@ public class NetworkToolsTests
         return await task!;
     }
 
-    private static OpennessWorkerClient CreateClient(
-        McpAccessMode mode = McpAccessMode.ReadWrite,
-        ProjectSessionBinding? binding = null)
-        => new(
-            binding ?? new ProjectSessionBinding(null),
-            logger: null,
-            workerExecutablePath: FakeWorkerLocator.Locate(),
-            accessPolicy: new OperationAccessPolicy(mode));
-
     private static async Task<OpennessWorkerClient> CreateBoundClientAsync(string projectPath)
     {
         var binding = new ProjectSessionBinding(null);
-        var client = CreateClient(binding: binding);
+        var client = FakeWorkerClients.Create(binding: binding);
         await FakeWorkerBinding.BindVerifiedAsync(client, binding, projectPath);
         return client;
     }
@@ -124,7 +116,7 @@ public class NetworkToolsTests
         string projectPath = StableScenario)
     {
         var binding = new ProjectSessionBinding(null);
-        var client = CreateClient(binding: binding);
+        var client = FakeWorkerClients.Create(binding: binding);
         NetworkVerifiedWriteFixture.VerifyAsync(client, binding, projectPath).GetAwaiter().GetResult();
         safety = NetworkGuardedWriteFixture.CreateRunner(client, audit.Path);
         return client;
@@ -221,7 +213,7 @@ public class NetworkToolsTests
 
         Assert.True(result.IsError);
         Assert.Contains("at least one", ReadText(result));
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.Equal("1.0", root.GetProperty("contractVersion").GetString());
         Assert.Equal(JsonValueKind.Array, root.GetProperty("warnings").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("batch").ValueKind);
@@ -256,7 +248,7 @@ public class NetworkToolsTests
 
         var result = await NetworkRead(client, new[] { ReadHardware("r1") });
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.Equal("1.0", root.GetProperty("contractVersion").GetString());
         Assert.Equal(JsonValueKind.Array, root.GetProperty("warnings").ValueKind);
         Assert.Empty(root.GetProperty("warnings").EnumerateArray());
@@ -284,7 +276,7 @@ public class NetworkToolsTests
         var result = await NetworkRead(client, operations);
 
         Assert.False(result.IsError, ReadText(result));
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.False(root.GetProperty("success").GetBoolean());
 
         var items = root.GetProperty("batch").GetProperty("operations");
@@ -326,7 +318,7 @@ public class NetworkToolsTests
 
         var preview = await NetworkWrite(client, safety, operations);
 
-        var root = ReadStructured(preview);
+        var root = CanonicalToolDocument.Read(preview);
         Assert.False(preview.IsError, ReadText(preview));
         Assert.Equal("network_write", root.GetProperty("tool").GetString());
         Assert.Equal("preview", root.GetProperty("phase").GetString());
@@ -364,7 +356,7 @@ public class NetworkToolsTests
             safety,
             new[] { ConfigureDevice("configure") });
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.True(result.IsError);
         Assert.Equal("error", root.GetProperty("phase").GetString());
         Assert.False(root.GetProperty("success").GetBoolean());
@@ -379,7 +371,7 @@ public class NetworkToolsTests
     public async Task NetworkWrite_ReadOnlyDefenseRejectsBeforeSnapshot()
     {
         using var audit = new TempAuditDirectory();
-        using var client = CreateClient(McpAccessMode.ReadOnly);
+        using var client = FakeWorkerClients.Create(McpAccessMode.ReadOnly);
 
         var result = await NetworkWrite(client, NetworkGuardedWriteFixture.CreateRunner(client, audit.Path), new[] { AddDevice("w1") });
 
@@ -387,7 +379,7 @@ public class NetworkToolsTests
         Assert.Contains("read-only mode", ReadText(result));
         Assert.Equal(
             WorkerFailureCategories.AccessDenied,
-            ReadStructured(result).GetProperty("error").GetProperty("category").GetString());
+            CanonicalToolDocument.Read(result).GetProperty("error").GetProperty("category").GetString());
     }
 
 
@@ -402,7 +394,7 @@ public class NetworkToolsTests
             safety,
             new[] { AddDevice("w1") });
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.True(result.IsError);
         Assert.Contains("boom", ReadText(result));
         Assert.Equal("error", root.GetProperty("phase").GetString());
@@ -419,7 +411,7 @@ public class NetworkToolsTests
         // HardwareConfigInfo: nothing may be planned against a state that failed its contract.
         var result = await NetworkWrite(client, safety, new[] { AddDevice("w1") });
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.True(result.IsError);
         Assert.Equal("error", root.GetProperty("phase").GetString());
         Assert.Equal(
@@ -437,7 +429,7 @@ public class NetworkToolsTests
 
         var result = await NetworkWrite(client, safety, operations, dryRun: false);
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.False(result.IsError, ReadText(result));
         Assert.True(root.GetProperty("success").GetBoolean(), root.GetRawText());
         Assert.Equal("network_write", root.GetProperty("tool").GetString());
@@ -463,7 +455,7 @@ public class NetworkToolsTests
 
         var result = await NetworkWrite(client, safety, operations, dryRun: false);
 
-        var root = ReadStructured(result);
+        var root = CanonicalToolDocument.Read(result);
         Assert.False(result.IsError, ReadText(result));
         Assert.False(root.GetProperty("success").GetBoolean());
 

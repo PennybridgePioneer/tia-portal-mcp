@@ -8,7 +8,6 @@ using TiaMcpServer.Hmi;
 using TiaMcpServer.Network;
 using TiaMcpServer.OperationBatches;
 using TiaMcpServer.ProjectTree;
-using TiaMcpServer.ProjectLifecycle;
 using TiaMcpServer.Safety;
 using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Tools;
@@ -138,9 +137,6 @@ namespace TiaMcpServer
                 .WithAccessModeTools(accessMode);
 
             using var host = builder.Build();
-            NetworkReadTools.RegisterExecutor(
-                host.Services.GetRequiredService<OpennessWorkerClient>(),
-                host.Services.GetRequiredService<NetworkReadOperationExecutor>());
             await host.RunAsync();
             return 0;
         }

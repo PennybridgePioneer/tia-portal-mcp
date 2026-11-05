@@ -1,3 +1,4 @@
+using TiaMcpServer.Tests.TestSupport;
 using Xunit;
 
 namespace TiaMcpServer.Tests.Worker;
@@ -5,31 +6,29 @@ namespace TiaMcpServer.Tests.Worker;
 // Dispatch/lifecycle code remains net48 Siemens-facing; these guards complement session behavior tests.
 public sealed class ActiveProjectContextSourceTests
 {
-    private static readonly string Root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    private static readonly string Root = RepositoryFiles.Root;
     private static string Read(string path) => File.ReadAllText(Path.Combine(Root, "TiaMcpServer.OpennessWorker", path));
+
+    private static string DispatchSource => string.Join("\n",
+        new[] { "Program.cs", "Program.NetworkDispatch.cs", "Program.PlcDispatch.cs" }.Select(Read));
 
     [Fact]
     public void ProjectDispatch_ResolvesOwnerAfterFreshIdentityCheck()
     {
         var body = Method(Read("Program.cs"), "private static WorkerResponse WithActiveContext(");
-        AssertOrdered(body, "ValidateExpectedAfterProjectResolution(", "return body(session)");
+        AssertOrdered(body, "ProjectOpenGate.Require(session.CurrentProjectPath, request.ProjectPath, _accessMode,",
+            "allowRequestedNotOpen: false, allowNoProject: false", "ValidateExpectedAfterProjectResolution(",
+            "session.ActiveContext is null || session.TiaPortal is null", "WorkerFailureCategories.WorkerOperationFailed",
+            "ProjectOpenPolicy.NoProjectOpenMessage(_accessMode)", "return body(session)");
         // Content writes and compile run on the ProjectBase root of any delivered container; the
         // capability gate in WithSession decides which container kinds reach a handler at all.
-        Assert.DoesNotContain("WithProject(", Read("Program.cs"));
+        Assert.DoesNotContain("WithProject(", DispatchSource);
         var root = Method(Read("Program.cs"), "private static WorkerResponse WithEngineeringRoot(");
         Assert.Contains("WithActiveContext(request, session => body(session.EngineeringRoot!))", root);
-        Assert.DoesNotContain("session.Project", Read("Program.cs"));
-        var subnet = Method(Read("Program.cs"), "private static WorkerResponse WithSubnetLifecycleProject(");
-        AssertOrdered(subnet, "ValidateExpectedAfterProjectResolution(", "body(session)");
-    }
-
-    [Fact]
-    public void QualificationProbes_RemainStandaloneOnly()
-    {
-        // Internal probes save or compile-and-revert a project; they are not delivered for local sessions.
-        var program = Read("Program.cs");
-        Assert.Equal(4, program.Split("session.RequireStandaloneOwner().Project").Length - 1);
-        Assert.Contains("SubnetLifecycleMutationProbeService.Run(", Method(program, "private static WorkerResponse ProbeSubnetLifecycleMutations("));
+        Assert.DoesNotContain("session.Project", DispatchSource);
+        Assert.DoesNotContain("WithSubnetLifecycleProject(", DispatchSource);
+        var vci = Method(Read("Program.cs"), "private static WorkerResponse WriteVci(");
+        Assert.Contains("WithActiveContext(request, session => Success(VciDispatch.Write(session.TiaPortal!", vci);
     }
 
     [Fact]
@@ -48,11 +47,16 @@ public sealed class ActiveProjectContextSourceTests
     {
         var service = Read("Openness/Project/ProjectLifecycleService.cs");
         var read = Method(service, "private static ActiveProjectContext? ResolveProjectForRead(");
-        AssertOrdered(read, "session.EnsureConnected(", "ProjectOpenPolicy.Decide", "return session.ActiveContext");
+        AssertOrdered(read, "session.EnsureConnected(",
+            "ProjectOpenGate.Require(session.CurrentProjectPath, requestedProjectPath, mode,",
+            "allowRequestedNotOpen: true, allowNoProject: true", "return session.ActiveContext");
         Assert.DoesNotContain(".Open(", read);
         var resolve = Method(service, "private static void EnsureRequestedContext(");
-        AssertOrdered(resolve, "session.EnsureConnected(", "ProjectOpenPolicy.Decide");
+        AssertOrdered(resolve, "session.EnsureConnected(",
+            "ProjectOpenGate.Require(session.CurrentProjectPath, projectPath, session.AccessMode,",
+            "allowRequestedNotOpen: false, allowNoProject: true");
         Assert.DoesNotContain(".Open(", resolve);
+        Assert.DoesNotContain("McpAccessMode.ReadWrite", resolve);
         var mutation = Method(service, "private static Project EnsureProject(");
         AssertOrdered(mutation, "EnsureRequestedContext(session, projectPath)", "RequireStandaloneOwner().Project");
         Assert.DoesNotContain(".Open(", mutation);
@@ -82,7 +86,7 @@ public sealed class ActiveProjectContextSourceTests
                 Assert.DoesNotContain("LocalSession.Save(", source);
         }
         var lifecycle = Read("Openness/Project/ProjectLifecycleService.cs");
-        Assert.Equal(1, lifecycle.Split("LocalSession.Save(").Length - 1);
+        Assert.Equal(1, RepositoryFiles.CountOccurrences(lifecycle, "LocalSession.Save("));
         Assert.Contains("LocalSession.Save(", Method(lifecycle, "public static ProjectLifecycleResultInfo SaveProject("));
         foreach (var file in new[] { "Openness/Project/ProjectLifecycleOwner.cs", "Openness/Project/LocalSessionOwner.cs" })
         {

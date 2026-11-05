@@ -9,17 +9,10 @@ namespace TiaMcpServer.OpennessWorker.Openness.Network;
 /// <summary>
 /// Production implementation of the Phase 4 subnet lifecycle operations (<c>create_subnet</c>,
 /// <c>update_subnet</c>, <c>delete_subnet</c>). Each entry point opens exactly one Openness
-/// transaction, performs every requested mutation inside it, and verifies operation-specific
-/// postconditions — including that the root device count never changes — after the transaction
-/// commits and is disposed. This file is a distinct production implementation; it does not call,
-/// alias, or share code with <see cref="SubnetLifecycleMutationProbeService"/>, which remains an
-/// internal-only evidence probe.
+/// transaction and performs every requested mutation inside it.
 /// </summary>
 internal static class SubnetLifecycleService
 {
-    private const string EthernetTypeIdentifier = "System:Subnet.Ethernet";
-    private const string ProfibusTypeIdentifier = "System:Subnet.Profibus";
-
     public static SubnetLifecycleResultInfo Create(
         TiaPortal tiaPortal,
         ProjectBase project,
@@ -29,7 +22,6 @@ internal static class SubnetLifecycleService
         string? transmissionSpeed)
     {
         var typeIdentifier = ResolveTypeIdentifier(networkType);
-        var deviceCountBefore = project.Devices.Count;
 
         string? createdSubnetId;
         using (var exclusiveAccess = tiaPortal.ExclusiveAccess("Network Phase 4 subnet lifecycle: create_subnet"))
@@ -47,13 +39,7 @@ internal static class SubnetLifecycleService
         {
             SubnetId = createdSubnetId!,
             Name = name,
-            NetworkDeviceCount = deviceCountBefore,
         };
-        result.Verification = NetworkMutationVerifier.VerifySubnet(project, new WorkerRequest
-        {
-            Method = "create_subnet", SubnetName = name, SubnetNetworkType = networkType,
-            SubnetHighestAddress = highestAddress, SubnetTransmissionSpeed = transmissionSpeed,
-        }, result, deviceCountBefore, Array.Empty<NetworkNodeIdentityInfo>());
         return result;
     }
 
@@ -65,22 +51,7 @@ internal static class SubnetLifecycleService
         int? highestAddress,
         string? transmissionSpeed)
     {
-        // Current-type applicability requires an Openness read of the exact target, so an
-        // inapplicable PROFIBUS-only field is rejected here, before any transaction is opened.
-        var currentTypeIdentifier = ResolveCurrentTypeIdentifierOrThrow(
-            ResolveExactSubnetOrThrow(project, subnetId, "update_subnet"),
-            subnetId);
-        if ((highestAddress is not null || transmissionSpeed is not null)
-            && !string.Equals(currentTypeIdentifier, ProfibusTypeIdentifier, StringComparison.Ordinal))
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.ValidationError,
-                $"Subnet '{subnetId}' is not a PROFIBUS subnet. HighestAddress and TransmissionSpeed "
-                + "are not applicable and were rejected before any mutation was attempted.");
-        }
-
-        var deviceCountBefore = project.Devices.Count;
-        var capturedName = ReadRequiredSubnetNameOrThrow(ResolveExactSubnetOrThrow(project, subnetId, "update_subnet"), subnetId);
+        string capturedName;
 
         using (var exclusiveAccess = tiaPortal.ExclusiveAccess("Network Phase 4 subnet lifecycle: update_subnet"))
         using (var transaction = exclusiveAccess.Transaction(project, "update_subnet"))
@@ -92,20 +63,22 @@ internal static class SubnetLifecycleService
             }
 
             ApplyProfibusAttributes(subnet, highestAddress, transmissionSpeed);
+            capturedName = ReadRequiredSubnetNameOrThrow(subnet, subnetId);
+            // Portal can silently ignore a colliding rename.
+            if (name is not null && !string.Equals(capturedName, name, StringComparison.Ordinal))
+            {
+                throw PostconditionFailed("update_subnet",
+                    $"Portal did not rename subnet '{subnetId}' to '{name}'; the subnet is still named '{capturedName}'. "
+                    + "Another subnet may already hold that name. No transaction was committed.");
+            }
             transaction.CommitOnDispose();
         }
 
         var result = new SubnetLifecycleResultInfo
         {
             SubnetId = subnetId,
-            Name = name ?? capturedName,
-            NetworkDeviceCount = deviceCountBefore,
+            Name = capturedName,
         };
-        result.Verification = NetworkMutationVerifier.VerifySubnet(project, new WorkerRequest
-        {
-            Method = "update_subnet", SubnetId = subnetId, SubnetName = name,
-            SubnetHighestAddress = highestAddress, SubnetTransmissionSpeed = transmissionSpeed,
-        }, result, deviceCountBefore, Array.Empty<NetworkNodeIdentityInfo>());
         return result;
     }
 
@@ -114,20 +87,13 @@ internal static class SubnetLifecycleService
         ProjectBase project,
         string subnetId)
     {
-        int deviceCountBefore;
         string capturedName;
-        IReadOnlyList<NetworkNodeIdentityInfo> affectedNodes;
 
         using (var exclusiveAccess = tiaPortal.ExclusiveAccess("Network Phase 4 subnet lifecycle: delete_subnet"))
         using (var transaction = exclusiveAccess.Transaction(project, "delete_subnet"))
         {
             var subnet = ResolveExactSubnetOrThrow(project, subnetId, "delete_subnet");
-            _ = ResolveCurrentTypeIdentifierOrThrow(subnet, subnetId);
             capturedName = ReadRequiredSubnetNameOrThrow(subnet, subnetId);
-            // Capture reliable exact identities immediately before mutation. Unknown inventory
-            // is not an empty inventory and cannot establish preservation after deletion.
-            affectedNodes = NetworkMutationVerifier.CaptureAffectedNodes(subnet);
-            deviceCountBefore = project.Devices.Count;
             subnet.Delete();
             transaction.CommitOnDispose();
         }
@@ -136,10 +102,7 @@ internal static class SubnetLifecycleService
         {
             SubnetId = subnetId,
             Name = capturedName,
-            NetworkDeviceCount = deviceCountBefore,
         };
-        result.Verification = NetworkMutationVerifier.VerifySubnet(project,
-            new WorkerRequest { Method = "delete_subnet", SubnetId = subnetId }, result, deviceCountBefore, affectedNodes);
         return result;
     }
 
@@ -170,49 +133,10 @@ internal static class SubnetLifecycleService
 
     private static string ResolveTypeIdentifier(string networkType)
     {
-        if (string.Equals(networkType, SubnetLifecycleContract.Ethernet, StringComparison.Ordinal))
-        {
-            return EthernetTypeIdentifier;
-        }
-
-        if (string.Equals(networkType, SubnetLifecycleContract.Profibus, StringComparison.Ordinal))
-        {
-            return ProfibusTypeIdentifier;
-        }
-
-        throw new WorkerOperationException(
+        return SubnetLifecycleContract.TypeIdentifierFor(networkType) ?? throw new WorkerOperationException(
             WorkerFailureCategories.ValidationError,
             $"NetworkType '{networkType}' is not supported. Valid values: "
             + $"{SubnetLifecycleContract.Ethernet}, {SubnetLifecycleContract.Profibus}.");
-    }
-
-    /// <summary>
-    /// Reads the target's current type identifier and fails closed — never falling back to a
-    /// guess — when it is unreadable or outside the two supported types.
-    /// </summary>
-    private static string ResolveCurrentTypeIdentifierOrThrow(Subnet subnet, string subnetId)
-    {
-        string? typeIdentifier;
-        try
-        {
-            typeIdentifier = subnet.TypeIdentifier;
-        }
-        catch (EngineeringException)
-        {
-            typeIdentifier = null;
-        }
-
-        if (typeIdentifier is null
-            || (!string.Equals(typeIdentifier, EthernetTypeIdentifier, StringComparison.Ordinal)
-                && !string.Equals(typeIdentifier, ProfibusTypeIdentifier, StringComparison.Ordinal)))
-        {
-            throw new WorkerOperationException(
-                WorkerFailureCategories.TargetKindUnsupported,
-                $"Subnet '{subnetId}' has an unavailable or unsupported network type. Only Ethernet "
-                + "and PROFIBUS subnets are supported.");
-        }
-
-        return typeIdentifier;
     }
 
     private static string ReadRequiredSubnetNameOrThrow(Subnet subnet, string subnetId)
@@ -230,8 +154,8 @@ internal static class SubnetLifecycleService
         if (string.IsNullOrWhiteSpace(name))
         {
             throw PostconditionFailed(
-                "delete_subnet",
-                $"Subnet '{subnetId}' did not expose a nonblank Name immediately before deletion. No delete was committed.");
+                "subnet lifecycle",
+                $"Subnet '{subnetId}' did not expose a nonblank Name. No transaction was committed.");
         }
 
         return name!;

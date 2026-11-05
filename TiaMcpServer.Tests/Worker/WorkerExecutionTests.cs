@@ -1,4 +1,5 @@
 using Siemens.Engineering;
+using TiaMcpServer.Contracts.Network;
 using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.OpennessWorker.Worker;
 using Xunit;
@@ -7,6 +8,162 @@ namespace TiaMcpServer.Tests.Worker;
 
 public sealed class WorkerExecutionTests
 {
+    [Theory]
+    [InlineData(true, true, WorkerFailureCategories.EngineeringRejected)]
+    [InlineData(true, false, WorkerFailureCategories.WorkerOperationFailed)]
+    [InlineData(false, true, WorkerFailureCategories.WorkerOperationFailed)]
+    public void Classify_UsesExceptionTypeAndMutationFlag(bool targetInvocation, bool mutates, string expected)
+    {
+        EngineeringException exception = targetInvocation
+            ? new EngineeringTargetInvocationException("m") : new EngineeringException("m");
+        Assert.Equal(expected, WorkerExecution.Classify(exception, mutates));
+    }
+
+    [Fact]
+    public void WrappedEngineeringFailure_AfterPortalDisposal_MapsToPortalLostAndKeepsOutcome()
+    {
+        var revision = 0L;
+        var outcome = new ConfigureNetworkDeviceResultInfo
+        {
+            DeviceName = "PLC_1", AppliedSettings = { ["Address"] = "10.0.0.1" }
+        };
+        var exception = new WorkerOperationException(WorkerFailureCategories.EngineeringRejected, "x",
+            engineeringError: new EngineeringErrorInfo { Type = "EngineeringTargetInvocationException", Message = "gone" },
+            configureNetworkDeviceOutcome: outcome);
+        var result = WorkerExecution.Execute(() => { revision++; throw exception; }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+        Assert.Same(outcome, result.ConfigureNetworkDeviceOutcome);
+        Assert.Equal("10.0.0.1", result.ConfigureNetworkDeviceOutcome!.AppliedSettings["Address"]);
+    }
+
+    [Fact]
+    public void WrappedEngineeringFailure_WithoutDisposal_IsRethrown()
+    {
+        var exception = new WorkerOperationException(WorkerFailureCategories.EngineeringRejected, "x",
+            engineeringError: new EngineeringErrorInfo { Type = "EngineeringTargetInvocationException", Message = "gone" });
+        var thrown = Assert.Throws<WorkerOperationException>(() => WorkerExecution.Execute(() => throw exception, () => 0, mutates: true));
+        Assert.Same(exception, thrown);
+    }
+
+    [Fact]
+    public void WrappedHmiFailure_AfterPortalDisposal_MapsToPortalLostAndKeepsOutcome()
+    {
+        var revision = 0L;
+        var outcome = new TiaMcpServer.Contracts.Hmi.HmiWriteOutcomeInfo { ObjectName = "T" };
+        outcome.AppliedProperties.Add("Create");
+        var exception = new WorkerOperationException(WorkerFailureCategories.WorkerOperationFailed, "x", hmiWriteOutcome: outcome);
+        var result = WorkerExecution.Execute(() => { revision++; throw exception; }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+        Assert.Same(outcome, result.HmiWriteOutcome);
+    }
+
+    [Fact]
+    public void WrappedHmiFailure_WithoutDisposal_IsRethrown()
+    {
+        var exception = new WorkerOperationException(WorkerFailureCategories.WorkerOperationFailed, "x",
+            hmiWriteOutcome: new TiaMcpServer.Contracts.Hmi.HmiWriteOutcomeInfo { ObjectName = "T" });
+        var thrown = Assert.Throws<WorkerOperationException>(() => WorkerExecution.Execute(() => throw exception, () => 0, mutates: true));
+        Assert.Same(exception, thrown);
+    }
+
+    [Fact]
+    public void WrappedVciFailure_AfterPortalDisposal_MapsToPortalLostAndKeepsOutcome()
+    {
+        var revision = 0L;
+        var outcome = new TiaMcpServer.Contracts.Vci.VciWriteOutcomeInfo { Leaves = 1, Failed = 1 };
+        var exception = new WorkerOperationException(WorkerFailureCategories.WorkerOperationFailed, "x", vciWriteOutcome: outcome);
+        var result = WorkerExecution.Execute(() => { revision++; throw exception; }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+        Assert.Same(outcome, result.VciWriteOutcome);
+    }
+
+    [Fact]
+    public void WrappedVciFailure_WithoutDisposal_IsRethrown()
+    {
+        var exception = new WorkerOperationException(WorkerFailureCategories.WorkerOperationFailed, "x",
+            vciWriteOutcome: new TiaMcpServer.Contracts.Vci.VciWriteOutcomeInfo { Leaves = 1 });
+        var thrown = Assert.Throws<WorkerOperationException>(() => WorkerExecution.Execute(() => throw exception, () => 0, mutates: true));
+        Assert.Same(exception, thrown);
+    }
+
+    [Fact]
+    public void VciPortalLostWrap_AfterDisposal_IsRethrownUnchanged()
+    {
+        var revision = 0L;
+        var exception = new WorkerOperationException(WorkerFailureCategories.PortalLost, "VCI lost the Portal.",
+            vciWriteOutcome: new TiaMcpServer.Contracts.Vci.VciWriteOutcomeInfo
+            {
+                Leaves = 1, Failed = 1, LastAttempted = new() { Operation = "export" }
+            });
+        var thrown = Assert.Throws<WorkerOperationException>(() => WorkerExecution.Execute(
+            () => { revision++; throw exception; }, () => revision, mutates: true));
+        Assert.Same(exception, thrown);
+        Assert.Equal("VCI lost the Portal.", thrown.Message);
+        Assert.NotNull(thrown.VciWriteOutcome!.LastAttempted);
+    }
+
+    [Fact]
+    public void WriteLookupFailure_AfterPortalDisposal_MapsToPortalLost()
+    {
+        var revision = 0L;
+        var software = new Siemens.Engineering.HmiUnified.HmiSoftware();
+        software.Tags.FindOverride = _ => { revision++; throw new EngineeringException("Access to a disposed object is not possible."); };
+        var result = WorkerExecution.Execute(() =>
+        {
+            TiaMcpServer.OpennessWorker.Openness.Hmi.HmiTagWriter.Delete(software, new() { TagName = "T" });
+            return new WorkerResponse { Success = true };
+        }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+    }
+
+    [Theory]
+    [InlineData("discrete")]
+    [InlineData("analog")]
+    public void AlarmWriteLookupFailure_AfterPortalDisposal_MapsToPortalLost(string kind)
+    {
+        var revision = 0L;
+        var software = new Siemens.Engineering.HmiUnified.HmiSoftware();
+        var disposed = new EngineeringException("Access to a disposed object is not possible.");
+        software.DiscreteAlarms.EnumerationFailure = disposed;
+        software.AnalogAlarms.EnumerationFailure = disposed;
+        var result = WorkerExecution.Execute(() =>
+        {
+            revision++;
+            TiaMcpServer.OpennessWorker.Openness.Hmi.HmiAlarmWriter.Delete(software, new() { AlarmName = "A", AlarmKind = kind });
+            return new WorkerResponse { Success = true };
+        }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+    }
+
+    [Fact]
+    public void HmiWriteRunFailure_NonEngineeringException_IsRethrownUnchanged()
+    {
+        var exception = new InvalidOperationException("other");
+        var thrown = Assert.Throws<InvalidOperationException>(() =>
+            TiaMcpServer.OpennessWorker.Openness.Hmi.HmiWriteRun.Failure(exception, new() { ObjectName = "T" }));
+        Assert.Same(exception, thrown);
+    }
+
+    [Fact]
+    public void WrappedFailureWithoutEngineeringError_IsNeverIntercepted()
+    {
+        var revision = 0L;
+        var exception = new WorkerOperationException(WorkerFailureCategories.ValidationError, "v");
+        var thrown = Assert.Throws<WorkerOperationException>(() => WorkerExecution.Execute(
+            () => { revision++; throw exception; }, () => revision, mutates: true));
+        Assert.Same(exception, thrown);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
@@ -17,6 +174,82 @@ public sealed class WorkerExecutionTests
 
         Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, result.FailureCategory);
         Assert.Equal("TIA Portal operation failed: Access to a disposed object is not possible.", result.Error);
+    }
+
+    [Fact]
+    public void MutationTargetInvocationFailure_MapsToEngineeringRejectedWithVerbatimChain()
+    {
+        var root = new InvalidOperationException("root cause");
+        var middle = new EngineeringException("middle", root);
+        var result = WorkerExecution.Execute(
+            () => throw new EngineeringTargetInvocationException("Siemens text", middle), () => 0, mutates: true);
+
+        Assert.False(result.Success);
+        Assert.Equal(WorkerFailureCategories.EngineeringRejected, result.FailureCategory);
+        Assert.Equal("TIA Portal rejected the operation: Siemens text", result.Error);
+        var info = Assert.IsType<EngineeringErrorInfo>(result.EngineeringError);
+        Assert.Equal("EngineeringTargetInvocationException", info.Type);
+        Assert.Equal("Siemens text", info.Message);
+        Assert.Collection(info.Inner,
+            first => { Assert.Equal("EngineeringException", first.Type); Assert.Equal("middle", first.Message); },
+            second => { Assert.Equal("InvalidOperationException", second.Type); Assert.Equal("root cause", second.Message); });
+    }
+
+    [Fact]
+    public void MutationOtherEngineeringFailure_StaysOrdinaryButCarriesTheError()
+    {
+        var result = WorkerExecution.Execute(
+            () => throw new EngineeringNotSupportedException("not supported here"), () => 0, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, result.FailureCategory);
+        var info = Assert.IsType<EngineeringErrorInfo>(result.EngineeringError);
+        Assert.Equal("EngineeringNotSupportedException", info.Type);
+        Assert.Equal("not supported here", info.Message);
+        Assert.Empty(info.Inner);
+    }
+
+    [Fact]
+    public void ReadTargetInvocationFailure_NeverMapsToEngineeringRejected()
+    {
+        var result = WorkerExecution.Execute(
+            () => throw new EngineeringTargetInvocationException("read failed"), () => 0);
+
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, result.FailureCategory);
+        Assert.Equal("TIA Portal operation failed: read failed", result.Error);
+        Assert.Equal("read failed", result.EngineeringError!.Message);
+    }
+
+    [Fact]
+    public void MutationTargetInvocationFailure_AfterPortalDisposal_StillMapsToPortalLost()
+    {
+        var revision = 0L;
+        var result = WorkerExecution.Execute(
+            () => { revision++; throw new EngineeringTargetInvocationException("gone"); }, () => revision, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.PortalLost, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+    }
+
+    [Fact]
+    public void NonEngineeringFailures_CarryNoEngineeringError()
+    {
+        var result = WorkerExecution.Execute(() => throw new InvalidOperationException("plain"), () => 0, mutates: true);
+
+        Assert.Equal(WorkerFailureCategories.WorkerOperationFailed, result.FailureCategory);
+        Assert.Null(result.EngineeringError);
+    }
+
+    [Fact]
+    public void EngineeringError_BoundsChainDepthAndMessageLength()
+    {
+        Exception chain = new InvalidOperationException(new string('z', 10_000));
+        for (var depth = 0; depth < 20; depth++) chain = new EngineeringException($"level {depth}", chain);
+
+        var result = WorkerExecution.Execute(() => throw new EngineeringTargetInvocationException("top", chain), () => 0, mutates: true);
+
+        var info = result.EngineeringError!;
+        Assert.Equal(EngineeringErrorInfo.MaxInnerCount, info.Inner.Count);
+        Assert.All(info.Inner, inner => Assert.True(inner.Message.Length <= EngineeringErrorInfo.MaxMessageChars));
     }
 
     [Fact]

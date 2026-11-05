@@ -1,8 +1,6 @@
 using System.Globalization;
-using System.Reflection;
 using Siemens.Engineering;
 using Siemens.Engineering.HW;
-using Siemens.Engineering.HW.Features;
 using TiaMcpServer.Contracts.Network;
 using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.OpennessWorker.Openness.Infrastructure;
@@ -12,7 +10,7 @@ namespace TiaMcpServer.OpennessWorker.Openness.Network;
 
 /// <summary>Resolves the complete node selector and all requested subnet/IO dependencies before
 /// the first scalar setter. Bare signatures forward to the same exact owner/node resolver.
-/// Completed attempts retain sparse applied and skipped maps for recovery.</summary>
+/// Rejected attempts retain the sparse applied settings for recovery.</summary>
 public static class NetworkDeviceConfigurator
 {
     public static ConfigureNetworkDeviceResultInfo Configure(
@@ -40,65 +38,47 @@ public static class NetworkDeviceConfigurator
         var networkInterface = resolved.OwningInterface!;
         var node = (Node)resolved.Value;
 
-        // Prove dependency selection before the first setter. An invalid IO selector is denied
-        // even if a later subnet connection might have failed and made that IO attach a skip.
+        // Prove dependency selection before the first setter.
         var subnetRequested = !string.IsNullOrWhiteSpace(subnetId);
         Subnet? connectedSubnet = null;
-        object? ioSystem = null;
+        IoSystem? ioSystem = null;
         IoConnector? ioConnector = null;
-        try
+        if (subnetRequested) connectedSubnet = FindExactlyOneSubnet(project, subnetId!);
+        if (ioSystemNumber.HasValue)
         {
-            if (subnetRequested) connectedSubnet = FindExactlyOneSubnet(project, subnetId!);
-            if (ioSystemNumber.HasValue)
+            var ioSystemSubnet = connectedSubnet ?? FindExactlyOneSubnet(
+                project, RequireIoSystemSubnetId(ioSystemSubnetId, deviceName));
+            ioSystem = FindExactlyOneIoSystem(ioSystemSubnet, ioSystemNumber.Value);
+            ioConnector = networkInterface.IoConnectors.Cast<IoConnector>().FirstOrDefault();
+            if (ioConnector is null)
             {
-                var ioSystemSubnet = connectedSubnet ?? FindExactlyOneSubnet(
-                    project, RequireIoSystemSubnetId(ioSystemSubnetId, deviceName));
-                ioSystem = FindExactlyOneIoSystem(ioSystemSubnet, ioSystemNumber.Value);
-                // Preserve selector-before-connector ordering. A normal empty collection is a
-                // supported skip; a failed collection read must not masquerade as that skip.
-                ioConnector = networkInterface.IoConnectors.Cast<IoConnector>().FirstOrDefault();
+                throw new WorkerOperationException(WorkerFailureCategories.TargetNotFound,
+                    $"Device '{deviceName}': the selected network interface exposes no IO connector, so ioSystem cannot be attached. No configuration was attempted.");
             }
         }
-        catch (EngineeringException)
-        {
-            throw new WorkerOperationException(WorkerFailureCategories.WorkerOperationFailed,
-                "Requested network dependency discovery was unreadable. No configuration was attempted.");
-        }
 
-        ApplyNodeAttribute(node, "Address", ipAddress, result);
-        ApplyNodeAttribute(node, "SubnetMask", subnetMask, result);
+        ApplyNodeAttribute(node, NetworkSettingKeys.Address, ipAddress, result);
+        ApplyNodeAttribute(node, NetworkSettingKeys.SubnetMask, subnetMask, result);
         // An explicit name is only settable once automatic generation is off; the caller opts in.
         if (pnDeviceNameAutoGeneration is { } generated)
-            ApplyNodeAttribute(node, "PnDeviceNameAutoGeneration", generated, generated ? "true" : "false", result);
-        ApplyNodeAttribute(node, "PnDeviceName", pnDeviceName, result);
+            ApplyNodeAttribute(node, NetworkSettingKeys.PnDeviceNameAutoGeneration, generated, generated ? "true" : "false", result);
+        ApplyNodeAttribute(node, NetworkSettingKeys.PnDeviceName, pnDeviceName, result);
 
-        var subnetConnected = false;
         if (subnetRequested)
         {
-            subnetConnected = ConnectSubnet(node, subnetId!, connectedSubnet!, result);
+            ConnectSubnet(node, subnetId!, connectedSubnet!, result);
         }
 
         if (ioSystemNumber.HasValue)
         {
-            var skip = NetworkPostconditionChecks.IoSystemSkipReason(subnetRequested, subnetConnected, ioConnector is not null);
-            if (skip is not null)
-            {
-                result.SkippedSettings["IoSystem"] = skip;
-            }
-            else
-            {
-                ConnectIoSystem(ioConnector!, ioSystem!, ioSystemNumber.Value, result);
-            }
+            ConnectIoSystem(ioConnector!, ioSystem!, ioSystemNumber.Value, result);
         }
 
-        if (result.AppliedSettings.Count == 0 && result.SkippedSettings.Count == 0)
+        if (result.AppliedSettings.Count == 0)
         {
             result.Messages.Add("No network settings were provided.");
         }
 
-        // Return completed attempts even when every requested setting was skipped. The host
-        // classifies skips as failures while retaining these sparse maps for recovery. Program
-        // attaches immediate applied-setting verification before serializing this result.
         return result;
     }
 
@@ -139,14 +119,14 @@ public static class NetworkDeviceConfigurator
         }
         catch (EngineeringException ex)
         {
-            result.SkippedSettings[attributeName] = ex.Message;
+            var category = WorkerExecution.Classify(ex, true);
+            throw new WorkerOperationException(category, WorkerExecution.FailureMessage(ex, category),
+                engineeringError: WorkerExecution.Describe(ex), configureNetworkDeviceOutcome: result);
         }
     }
 
-    /// <summary>Performs the connect action against an already-resolved subnet. Returns whether the
-    /// action itself succeeded, so a caller can decide whether a dependent IO-system attach is safe
-    /// to attempt.</summary>
-    private static bool ConnectSubnet(
+    /// <summary>Performs the connect action against an already-resolved subnet.</summary>
+    private static void ConnectSubnet(
         Node node,
         string subnetId,
         Subnet subnet,
@@ -154,25 +134,15 @@ public static class NetworkDeviceConfigurator
     {
         try
         {
-            // UNVERIFIED SDK CALL: V21 subnet connection API may be Node.ConnectToSubnet(Subnet) or equivalent.
-            InvokeFirstAvailable(node, new[] { "ConnectToSubnet", "Connect" }, subnet);
-            result.AppliedSettings["Subnet"] = subnetId;
-            return true;
+            node.ConnectToSubnet(subnet);
+            result.AppliedSettings[NetworkSettingKeys.Subnet] = subnetId;
         }
         catch (EngineeringException ex)
         {
-            result.SkippedSettings["Subnet"] = ex.Message;
+            var category = WorkerExecution.Classify(ex, true);
+            throw new WorkerOperationException(category, WorkerExecution.FailureMessage(ex, category),
+                engineeringError: WorkerExecution.Describe(ex), configureNetworkDeviceOutcome: result);
         }
-        catch (InvalidOperationException ex)
-        {
-            result.SkippedSettings["Subnet"] = ex.Message;
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is EngineeringException engineeringException)
-        {
-            result.SkippedSettings["Subnet"] = engineeringException.Message;
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -217,27 +187,20 @@ public static class NetworkDeviceConfigurator
 
     private static void ConnectIoSystem(
         IoConnector ioConnector,
-        object ioSystem,
+        IoSystem ioSystem,
         int ioSystemNumber,
         ConfigureNetworkDeviceResultInfo result)
     {
         try
         {
-            // UNVERIFIED SDK CALL: V21 IO connector attachment may be ConnectToIoSystem(IoSystem) or equivalent.
-            InvokeFirstAvailable(ioConnector, new[] { "ConnectToIoSystem", "Connect" }, ioSystem);
-            result.AppliedSettings["IoSystem"] = ioSystemNumber.ToString(CultureInfo.InvariantCulture);
+            ioConnector.ConnectToIoSystem(ioSystem);
+            result.AppliedSettings[NetworkSettingKeys.IoSystem] = ioSystemNumber.ToString(CultureInfo.InvariantCulture);
         }
         catch (EngineeringException ex)
         {
-            result.SkippedSettings["IoSystem"] = ex.Message;
-        }
-        catch (InvalidOperationException ex)
-        {
-            result.SkippedSettings["IoSystem"] = ex.Message;
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is EngineeringException engineeringException)
-        {
-            result.SkippedSettings["IoSystem"] = engineeringException.Message;
+            var category = WorkerExecution.Classify(ex, true);
+            throw new WorkerOperationException(category, WorkerExecution.FailureMessage(ex, category),
+                engineeringError: WorkerExecution.Describe(ex), configureNetworkDeviceOutcome: result);
         }
     }
 
@@ -245,9 +208,9 @@ public static class NetworkDeviceConfigurator
     /// Matches exactly one IO system by its modeled number within the already-resolved owning
     /// subnet. Zero or multiple matches fail closed.
     /// </summary>
-    private static object FindExactlyOneIoSystem(Subnet subnet, int number)
+    private static IoSystem FindExactlyOneIoSystem(Subnet subnet, int number)
     {
-        object? match = null;
+        IoSystem? match = null;
         var count = 0;
         var unreadable = false;
         foreach (IoSystem candidate in subnet.IoSystems)
@@ -302,33 +265,5 @@ public static class NetworkDeviceConfigurator
         => !string.IsNullOrWhiteSpace(candidateId)
             && !string.IsNullOrWhiteSpace(requestedId)
             && string.Equals(candidateId, requestedId, StringComparison.Ordinal);
-
-    private static void InvokeFirstAvailable(object target, IEnumerable<string> methodNames, object argument)
-    {
-        foreach (var methodName in methodNames)
-        {
-            var method = target.GetType()
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-                .FirstOrDefault(candidate =>
-                {
-                    if (!string.Equals(candidate.Name, methodName, StringComparison.Ordinal))
-                    {
-                        return false;
-                    }
-
-                    var parameters = candidate.GetParameters();
-                    return parameters.Length == 1 && parameters[0].ParameterType.IsInstanceOfType(argument);
-                });
-
-            if (method is not null)
-            {
-                method.Invoke(target, new[] { argument });
-                return;
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"No supported connection method was found on '{target.GetType().Name}'.");
-    }
 
 }

@@ -411,6 +411,8 @@ public sealed class ToolOutputContractConformanceTests
                     Assert.Equal(2, document.GetProperty("result").GetProperty("value").GetProperty("portals").GetArrayLength());
             }
         }
+        if (probe.Tool is "network_write" or "hmi_write" or "vci_write")
+            Assert.Equal("2.0", result.StructuredContent!.Value.GetProperty("contractVersion").GetString());
         if (probe.Tool == "network_read")
         {
             var document = result.StructuredContent!.Value;
@@ -450,7 +452,7 @@ public sealed class ToolOutputContractConformanceTests
         {
             var document = result.StructuredContent!.Value;
             Assert.Equal("plc_write", document.GetProperty("tool").GetString());
-            Assert.Equal("1.0", document.GetProperty("contractVersion").GetString());
+            Assert.Equal("2.0", document.GetProperty("contractVersion").GetString());
             Assert.Equal(System.Text.Json.JsonValueKind.Array, document.GetProperty("warnings").ValueKind);
             Assert.Equal(System.Text.Json.JsonValueKind.Null, document.GetProperty("batch").ValueKind);
             Assert.Equal(probe.ExpectIsError ? "error" : "preview", document.GetProperty("phase").GetString());

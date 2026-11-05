@@ -398,15 +398,25 @@ format, used by the worker, `PersistentWorkerTransport`, and the FakeWorker.
 `WorkerJson.Envelope` reads `WorkerRequest` and `WorkerResponse` (camelCase,
 case-insensitive) and writes responses with null members omitted;
 `WorkerJson.Request` writes requests with every member, null or not.
-`WorkerJson.SerializePayload` renders the `payload` document and writes null
-members unless the payload root carries `[LegacyNullOmission(reason)]`; a
-collection payload follows its element type. The marked set, and the reason each
-type has not switched yet, is pinned by `WorkerPayloadNullPolicyRegisterTests`
-(see [the JSON contract roadmap](roadmap/json-contract.md)).
+`WorkerJson.SerializePayload` renders the `payload` document with `ExplicitNullPayload`,
+writing null members except those explicitly declared conditional with
+`[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`. This applies to
+object roots and collection elements alike (see [the JSON contract roadmap](roadmap/json-contract.md)).
+
+Before the permissive envelope decode, `PersistentWorkerTransport` calls
+`NetworkPayloadContract.ValidateEnvelopeOutcome` on raw `configureNetworkDeviceOutcome` JSON.
+The conditional root name must have exact casing and appear at most once; a non-null value goes
+through the required-member worker-payload reader. Missing, unknown, wrongly cased, duplicate or
+malformed outcome members fail `protocol_error` without publishing the rejected evidence, before
+legacy normalization can fill or discard them. An absent or explicit-null outcome is allowed and
+leaves applied state unknown. Request/subset equality is checked later during typed projection.
 
 `OpennessWorkerClient` is the typed host facade. It constructs `WorkerRequest`
 objects, performs host authorization, invokes the transport, normalizes failure
 categories, caps warning output, and applies project-binding transitions.
+Both host and worker authorize operations through `OperationPolicyCatalog`;
+worker requests carry no confirmation flag. Lifecycle user confirmation stays in
+the host's guarded pipeline before dispatch.
 
 The worker dispatch loop maps every method name to a focused Siemens operation.
 `Program.Execute` delegates exception mapping to `WorkerExecution` and retains response stamping. The actual
@@ -417,7 +427,27 @@ domains. An escaping `EngineeringException` also maps to `portal_lost` when the
 session observed unexpected disposal of a current Portal attachment during that
 execution. This uses cached event evidence, without native liveness calls or
 message matching. Deliberate detach, stale callbacks and earlier disposal do not
-qualify; ordinary engineering errors remain `worker_operation_failed`.
+qualify. For a mutation worker method (`ProjectMutation` in `OperationPolicyCatalog`, passed to
+`WorkerExecution.Execute` as `mutates`), an `EngineeringTargetInvocationException` maps to
+`engineering_rejected`; the flag spans the entire method, including connection, identity and target checks before a native write. It does not prove a setter or create was reached. Any other engineering error, and a target-invocation error from a read
+method, remains `worker_operation_failed`. VCI's read-only `create_workspace` planning recheck
+deliberately calls `Classify` with `mutates:false`, so even a target-invocation exception there
+remains `worker_operation_failed` with engineering evidence despite the outer mutation method. Both carry `WorkerResponse.EngineeringError`
+(`EngineeringErrorInfo`: type, message bounded at 4,000 characters, inner chain bounded at eight).
+`WorkerExecution.Classify` and `Describe` are shared by this catch, Network configure wrap sites,
+`HmiWriteRun.Failure` and `VciFailureLog`. HMI wraps preserve both `EngineeringError` and the separate
+`HmiWriteOutcome` carrier through `WorkerOperationException`, `WorkerResponse` and `WorkerCallResult`.
+An HMI `WorkerOperationException` can carry a partial outcome without an engineering error; its
+original category is preserved, including a refusal raised after earlier setters completed.
+Configure stops at the first rejection and carries `ConfigureNetworkDeviceOutcome` through
+`WorkerOperationException`, `WorkerResponse` and `WorkerCallResult`; the host projects its typed
+`appliedSettings` onto the failed item. A wrapped failure with either `EngineeringError` or
+`HmiWriteOutcome` also passes the current-execution disposal check, as does a `VciWriteOutcome`
+whose category is not already `portal_lost`. `portal_lost` is decided first, carries no engineering
+error, and preserves any carried partial configure, HMI or VCI outcome. An already classified VCI
+Portal-loss wrapper is preserved unchanged, including its `lastAttempted` context.
+Direct fatal loss after a partial configure
+has not been exercised live.
 Broad Network recovery, XML-bundle export, cached HMI liveness and
 Multiuser inventory catches exclude it through `OpennessExceptions.IsRecoverable`;
 Multiuser final identity checks preserve an original fatal body exception. The
@@ -431,7 +461,7 @@ Existing narrower property-read
 policies, typed post-mutation failures, cleanup warnings and completed-operation
 diagnostic stamping retain their contracts. VCI's writer keeps its outcome-bearing
 mapping; VCI read/plan use the shared boundary. See the
-[B-16/Q3 implementation and verification record](superpowers/plans/2026-10-19-worker-portal-loss.md)
+[B-16/Q3 live verification report](superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md)
 for offline qualification and scoped Network, PLC, VCI and local-session read
 evidence. The HMI discovery and stale-project cache fixes have offline regressions
 and a scoped installed-candidate read retest: loss, immediate cursor invalidation
@@ -453,9 +483,12 @@ operations, including the Phase 4 subnet lifecycle operations (`create_subnet`,
 catalog before a worker invocation; a new worker method belongs to its owning domain catalog.
 `BatchOperationCatalog` and `BatchWorkerInvoker` were removed with the generic batch tools.
 
-`OperationBatches` provides request-agnostic shared execution and
-payload-budget infrastructure to both domains. Its network call sites use network-specific
-payload-budget hints, such as narrowing `query`/`maxResults` or splitting a network batch.
+`OperationBatches` provides request-agnostic shared execution and payload-budget infrastructure.
+`Tools/BatchReadTool.RunAsync<TItem>` owns the common PLC, Network, HMI and VCI read flow:
+catalog validation, effective-mode access checks, verified binding, independent item execution,
+response budgeting and canonical delivery. Domain adapters retain their catalogs, invocation and
+typed projection callbacks, cursor handling and retry guidance. Network keeps its cached pagination
+executor; HMI captures the binding for cursor projection after each worker call returns.
 
 Both catalogs enforce a maximum of 50 operations and reject unknown operations, missing
 required fields, inapplicable fields, and invalid bounds before worker invocation.
@@ -496,24 +529,42 @@ registered tool is now structured; the three batch tools were removed rather tha
   runs an optional semantic validator). It applies the strict rules above plus
   `RespectNullableAnnotations` and a rule that every settable member is required, except a member
   declared `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`. A rejected payload
-  throws `JsonException`, which the decoders turn into `protocol_error`. The rule applies to a
-  payload whose root writes explicit nulls, so the reader refuses (`InvalidOperationException`) a
-  root type, or an array root's element type, that carries `[LegacyNullOmission]`: that payload
-  omits nulls on the wire and cannot be read with required members. The reader does not check
-  collection elements, dictionary values or generic arguments, so the typed validators keep their
-  null-element checks alongside their semantic rules.
+  throws `JsonException`, which the decoders turn into `protocol_error`. Required-member checks
+  also apply inside nested objects and collection elements. Nullable annotation enforcement does
+  not check collection elements, dictionary values or generic arguments, so the typed validators
+  keep their null-element checks alongside their semantic rules.
 - A member the worker legitimately omits is conditional, marked `WhenWritingNull` and described
-  in `ConditionalMemberRegisterTests`. This includes optional I/O/pagination evidence and new
-  Network connection/root-count/immediate-verification evidence; the register is the authority.
+  in `ConditionalMemberRegisterTests`. This includes optional I/O/pagination and Network connection
+  evidence, and the carried partial `ConfigureNetworkDeviceOutcome` and `HmiWriteOutcome`;
+  the register is the authority.
 - `TiaMcpServer/Tools/StructuredToolResult.cs` renders one canonical JSON document and returns it
   as both the `content` text block and a detached `structuredContent` `JsonElement`, from a single
   `CanonicalJson.Serialize` call, so the two representations cannot drift apart.
+- `TiaMcpServer/OperationBatches/OperationBatchReadResponse.cs` defines the shared read envelope
+  and tool-level error record. Rejections carry `batch:null` and MCP `isError:true`; a batch that
+  ran carries `error:null` and `isError:false`, even when individual items failed or were omitted.
+  The shared runner uses the same response composer for exact budget measurement and delivery.
+  Domain contract versions are HMI read `1.1`, PLC/Network/VCI reads `1.0`, and PLC/Network/HMI/VCI
+  writes `2.0`.
 - `TiaMcpServer/OperationBatches/StructuredOperationBatch*.cs` provides the shared
   item/failure/omission/count/truncation batch model and a read/write execution engine whose
   stop decision covers `protocol_error` alongside ordinary worker failures.
   `StructuredOperationFailure.blockImportOutcome` is a conditional member on every structured
   tool's failure schema; it appears only on a failed `update_block_logic` content-import item.
-- Network and PLC read/write, and HMI writes, use version `1.0`, warnings arrays and explicit nulls.
+- `StructuredOperationFailure.engineeringError` is a conditional member on every structured tool's
+  failure schema. The worker supplies it on `WorkerResponse`; the host copies it into an item failure
+  in `WriteRun.RunItemAsync`, the one shared projection, only for a failed call that carries it, so
+  host-side rejections never have one. The worker exception mapping and PLC/Network/HMI/VCI write seams
+  describe which paths produce it.
+- `HmiWritePayloadContract` validates a carried `HmiWriteOutcome` and places it in a failed item's
+  typed `result`, including non-engineering categorized failures. This is separate from the
+  conditional `failure.engineeringError`; an outcome without that error still describes possible
+  mutation. Missing outcome evidence is not an empty applied-properties list.
+- `VciWritePayloadContract` validates success and carried failure outcomes with their bounded typed
+  leaf-failure lists. Rejected evidence becomes `protocol_error` and is never echoed. VCI outcome
+  evidence remains separate from conditional `failure.engineeringError` and can survive `portal_lost`.
+- Network/PLC/VCI reads use version `1.0`, HMI reads use `1.1`, and Network/PLC/HMI/VCI writes use `2.0`,
+  with warnings arrays and explicit nulls.
   `CanonicalWriteSafety`, token preview DTOs, `WriteSafetyService`, `WriteSafetyTooling`,
   `SafetyRead` and the legacy write audit are retired.
 
@@ -642,28 +693,58 @@ from `reference-stubs/Siemens.Engineering.WinCCUnified/` and verified with the o
 
 `HmiWriteTools` registers nine typed create/update/delete operations for Unified tag tables, tags and
 discrete/analog alarms in writable modes. `HmiWriteCatalog` validates operation fields;
-`HmiWritePlanner` builds complete public-read evidence and `HmiWorkingState` applies caller-order
-effects. Dependent items re-plan before mutation. The initial delete-evidence cap is 200
-cross-reference queries for pre-existing removed tags, not a total-dispatch limit; dependent
-consequence rechecks are separate. Existing-tag rebinding that introduces new members cannot supply
-a later alarm in the same call: update, read tag/members, then make the alarm call separately.
+`HmiWritePlanner` builds one initial public-read evidence set per HMI, including delete
+consequences, before the first mutation. `HmiWorkingState` simulates caller-order effects so later
+items can use earlier creates, renames and deletions. Plans declare no `DependsOn`; there is no
+per-item re-planning or consequence refresh during mutation. The delete-evidence cap is 200
+cross-reference queries for pre-existing removed tags, not a total-dispatch limit.
+
+The three guards are `hmi_state_unverifiable` (block: incomplete device/table, update/delete target
+or delete-consequence evidence), `hmi_deletes_table_contents` (info) and
+`hmi_deletes_referenced_tag` (info). Collision and reference-existence refusals are delegated to
+Portal; update/delete targets still resolve before mutation. The catalog retains `'connection'
+requires 'plcTag'`, and a create requires `plcTag` or `dataType`. It does not reject their combination
+or a `plcTag` supplied without a connection.
+Portal can accept a dangling reference, so mutation success does not establish a valid HMI.
 
 `HmiWriteDomain` uses `WriteExecution` under the pinned binding lease, with no server
-elicitation, stop at first failure and no batch rollback. `HmiWriteVerifier` uses public readback and
-name-scoped Validate; it retains partial-update evidence, checks cleanup/deletion absence, follows
-rename effects and marks superseded items. Typed worker outcomes retain applied properties, the
-failed property and identity-checked create-cleanup status. Failed cleanup can leave an object.
+elicitation, stop at first failure and no batch rollback. It uses `TrustedWriteVerifier` with
+`HmiVerificationPolicy`, with no post-write public reads or native verification read-back. Completed items are
+`trusted` or `superseded`; failed/skipped items have no verification entry. Flat keys come from the
+planned effects and include the case-insensitive HMI name, object kind and name, plus alarm kind.
+A rename owns its old and new names; a later table delete also offers the captured removed-tag
+keys. No other keys cross object kinds (D4).
+
+Typed worker outcomes retain completed `appliedProperties`, the failed property and
+identity-checked create-cleanup status. A setter can mutate before throwing, so the failed property
+may be absent from `appliedProperties`; an empty list does not prove no mutation. Failed cleanup
+can leave an object. Native engineering rejections carry `failure.engineeringError`; categorized
+worker refusals can also carry an outcome, including cleanup after a create. Callers must inspect
+affected objects with `hmi_read`, run `validate`, and compile the HMI in the Portal UI after writes.
 Direct case-only tag rename exposes Siemens' setter failure; there is no hidden temporary rename.
 
 Worker requests use `WorkerRequest.HmiWrite`. The nine `hmi_*` mutation methods are ProjectMutation
 operations and map to `hmi_write` through `ProjectCapabilityCatalog.OperationFor`; reads map to
 `hmi_read`. Every handler uses `WithEngineeringRoot`, supporting standalone and local-session
-`ProjectBase` roots. Connections must already exist; no compile, save, server refresh or check-in is
-implicit. Mutations invalidate that HMI's read snapshots. Tag rows gain `displayName`/`plcName`, and
+`ProjectBase` roots. No operation creates a connection; no compile, save, server refresh or check-in
+is implicit. Mutations invalidate that HMI's read snapshots. Tag rows gain `displayName`/`plcName`, and
 alarm rows gain kind-specific `triggerBitAddress`/`triggerAddress`, with explicit nulls and unchanged
-read version `1.1`. The write contract is `1.0`, using shared canonical serialization, typed payload
+read version `1.1`. The write contract is `2.0`, using shared canonical serialization, typed payload
 decoding, budgets and exact-delivery audit v2 records; attempted failures keep typed state with
 root `error:null` and MCP `isError:false`.
+
+The [2026-10-30 scoped report](superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md)
+separates the 35 functional cases on installed `4.2.0-local.112.g96a28b7` from the focused R1
+partial-failure/supersedence check and manual UI, L5 and timing qualification on
+`4.2.0-local.113.g31d1a44`. Offline qualification passed
+7,644 default tests and 95.05% linked host/contracts line coverage. The maintainer accepted the
+manual compile queue as complete with six recorded R3 waivers: P10, P12-discrete, L1, L2 and L5
+compiled clean; L4 produced the expected two tag-reference errors and zero warnings. L5 local-session
+create/read/Validate/cleanup restored the complete inventory of seven tables, 72 tags and 78 alarms.
+No save or check-in was performed; `isModified` changed from `false` to `true`. The maintainer
+subsequently reported manual cleanup and the correct standalone project open. The timing archive
+and final restoration/hash checks passed. The recorded R1/R2/R3 qualification is complete with
+these waivers; it does not establish broader native fault or cleanup-failure coverage.
 
 `HmiSoftwareLocator` retains entries keyed by engineering root and explicit HMI name, but every
 locator call, including a cache hit, freshly resolves current project membership and selector
@@ -677,39 +758,62 @@ single-trace memory-return condition not met. No traversal-saving performance cl
 
 ### VCI reads and writes
 
-`VciReadCatalog` and `VciWriteCatalog` validate separate strict per-operation fields. Both tools
-share the canonical `1.0` batch contract, typed worker payload decoding and effective response
-budgets. The worker's `VciScopeResolver` expands Device-rooted PLC and Unified HMI selectors to
+`VciReadCatalog` and `VciWriteCatalog` validate separate strict per-operation fields. Reads retain
+contract `1.0`; writes use `2.0`, with canonical delivery, typed worker payload decoding and effective
+response budgets. The worker's `VciScopeResolver` expands Device-rooted PLC and Unified HMI selectors to
 leaves; it resolves HMI mapping paths through Device, `HmiSoftware` and `ScriptModule` ownership.
 Live Openness identities use `object.Equals`; ambiguous or unreadable owners never become guessed
 selectors. The public VCI capability is standalone-only: reads and `vci_plan` enter through
 `WithEngineeringRoot`, while all six writes use `WithActiveContext` for Portal access during import.
 
-`VciWritePlanner` uses one Observe `vci_plan` per independent item and re-plans an item after the
-nearest earlier same-workspace item. It never reads status. The guarded pipeline pins binding,
-executes items in order, stops after a failed item and records audit v2. The worker expands scopes,
-rejects occupied relative file keys and unsafe paths, then invokes native VCI only on leaves.
-Export checks mapping keys and target files again near the native call; the explicit scans grow
-with leaves × mappings. `sync_to_workspace` resolves current mapping/selector ownership and takes
+`VciWritePlanner` sends one Observe `vci_plan` for the first item per case-insensitive workspace.
+Later items have no inventory, counts, effects or evidence guards of their own, no `DependsOn`
+and no re-plan; operation info guards and the project-folder boundary remain. The call warns with
+dependent IDs. Planning never reads status. The guarded pipeline pins binding, executes items in
+order, stops after a failed item and records audit v2. The worker invokes native VCI only on leaves.
+Workspace conflict protection compares exact roots, case-insensitively and ignoring trailing
+separators. Nested roots are allowed; duplicate names reach native creation and a refusal can leave
+the requested empty root. Directory segments and containment remain guarded, while leaf filename
+policy retains only path-boundary/ADS checks. The length diagnostic counts the complete path up to
+259 characters, including `.xml`'s four characters or an eight-character reserve for other formats.
+
+Export performs containment checks around directory creation, without the former mapping-key or
+existing-file collision scans. Portal owns native overwrite, companion-file deletion and possible
+disruption of another mapping inside the authorized key directory. `sync_to_workspace` resolves
+current mapping/selector ownership and takes
 one plain `GetStatus()` reading immediately before each native synchronization. Import status
 prefiltering precedes one ExclusiveAccess transaction; each candidate's mapping and owner are
 re-resolved before native use, since import may recreate engineering objects. Sequential calls
 cannot make external remapping or status changes atomic; the import prefilter window remains.
 
-`VciWriteVerifier` checks mapping/workspace existence or absence, marks earlier same-workspace
-items `superseded`, and labels sync results `notStatusVerified`; it does not fetch status again.
+`VciFailureLog` retains up to 20 leaf failures in encounter order, with type/category evidence and
+messages cut to 500 characters; `failuresOmitted` counts further recorded failures, while result
+counts remain uncapped. Import prefilter failures are recorded before candidate synchronization
+failures, so there is no global scope-order guarantee. The first encountered/recorded failure
+determines the item category and native `engineeringError`, not necessarily the first selected
+leaf, unless a later top-level exception stops the operation. Non-native refusals
+have no engineering evidence. A rolled-back import can count every candidate failed while listing
+only the leaves that threw. Typed outcomes survive the shared Portal-disposal classification.
+
+`VciVerificationPolicy` uses one case-insensitive workspace key with `TrustedWriteVerifier` and
+no native read-back. Completed items are `trusted` or `superseded` by later attempted same-workspace
+items; an outcome-bearing failure can supersede earlier success, while a precondition refusal
+without an outcome cannot. Failed/skipped items have no entry. Callers inspect `vci_read` separately.
 Before each leaf the worker writes a request-matched breadcrumb. `portal_lost` invalidates binding
 immediately, while timeout/crash may attach the matching `lastAttempted` to the failure and audit.
 After context loss, explicit opening requires fresh zero-owner Portal evidence and exact target
 identity; no projectless response promotes to a verified project binding. The
 [VCI reference](SupportedOperations/VCI_OPERATIONS_SUMMARY.md) details operation fields, status
-decisions, path policy and retry limits; the [scoped report](superpowers/acceptance/reports/2026-10-16-vci-tools-live-acceptance.md)
-retains the failed frozen verdict and repaired-candidate evidence.
+decisions, path policy and retry limits. [ADR-0014](adr/0014-vci-write-native-rejection-contract.md)
+records the native-rejection/overwrite decision; the
+[current scoped report](superpowers/acceptance/reports/2026-11-01-vci-write-native-rejections-live-verification.md)
+keeps native observations, mixed timing results and untested crash/race/format limits separate.
 
 ### Typed Network payload registry
 
 `TiaMcpServer/Network/NetworkPayloadContract.cs` is the decoder of direct public Network worker
-success payloads. It maps each of the nine network operations to exactly one declared CLR result type
+success payloads and carried failed-configure outcomes. The transport validates a raw carried
+outcome before legacy envelope decoding (§6). The registry maps each of the nine network operations to exactly one declared CLR result type
 (`HardwareConfigInfo`, `CatalogEntryInfo[]`, `AddDeviceResultInfo`,
 `ConfigureNetworkDeviceResultInfo`, `NetworkObjectListInfo`, `NetworkObjectInspectionInfo`, and
 `SubnetLifecycleResultInfo` — the last shared by `create_subnet`, `update_subnet`, and
@@ -788,26 +892,26 @@ error path and has no write audit. Entered validation/binding/guard denials have
 error and one audit. Aggregate encoded-ID/protected-core admission runs before binding; it retains
 the existing 256-character per-ID limit, without a smaller per-ID or raw-character aggregate rule.
 
-`NetworkWritePlanner` reads ordinary typed hardware, resolves exact targets and records complete
-node/subnet/IO relationship evidence. Unknown inventory is not empty. Connected deletion fires
+`NetworkWritePlanner` reads one ordinary typed hardware snapshot, resolves exact targets and records
+node/subnet/IO relationship evidence. Incomplete discovery fails planning with
+`worker_operation_failed`; unknown inventory is not empty. Connected deletion fires
 `network_delete_connected_subnet` (`info`); incomplete consequences fire `network_state_unverifiable`
 (`block`). Both satisfaction fields are null. Blocks cannot be overridden in any mode.
 
-Planner `currentSettings` come from an exact node/subnet `inspect_network_object`, so they carry real
-Openness source/access; the snapshot fallback is `modeled`/`unknown`. A requested `pnDeviceName` on a
-node that auto-generates its name fails planning with `validation_error` unless
-`pnDeviceNameAutoGeneration:false` is supplied.
+Planner `currentSettings` are plain strings/nulls from that snapshot, with no per-item inspection
+or source/access metadata. Auto-generation and PROFIBUS attribute values absent from the snapshot
+are null. The PN-name planning pre-check is retired; callers can request auto-generation off before
+the name setter in the same item. Network plans declare no dependencies and `ReplanAsync` throws
+if called. Delete effects therefore omit nodes connected earlier in the same call; this is an
+initial-snapshot limit, not refreshed consequence evidence.
 
-`NetworkWriteVerifier` retains immediate applied-setting evidence before later deliberate changes,
-then reads the effective attempted prefix. Sparse skipped settings fail the item/call while keeping
-the typed result; each skipped setting gets a final preservation check against its pre-write value.
-Verification `identity` is the typed `NetworkMutationIdentityInfo`, and `finalChecks[]` are
-`NetworkFinalCheck` records with a typed `subject`, never interpolated names. The IO relationship is
-checked as scalar `IoSystemSubnet`/`IoSystemNumber`. Subnet-only moves do not imply IO detach/attach:
-an earlier explicit IO expectation remains unless explicitly superseded or removed by designed
-deletion consequences, so unexpected side effects can conservatively fail final verification.
-`verification.success` covers evidence only; execution failure stays in batch/root `success`.
-Root `project.Devices.Count` is separate from exact preservation of grouped/ungrouped devices/nodes.
+Network uses `TrustedWriteVerifier<NetworkOperationRequest>` with `NetworkVerificationPolicy`.
+It performs no read-back: successful items receive `trusted` or `superseded`, failed/skipped items
+have no entry. Configure failure can retain typed `deviceName`, `appliedSettings`, `messages` while
+later setters and batch items remain unattempted. Execution failure stays in batch/root `success`;
+`verification.success` is the conjunction of entries and may be true even with an empty list after
+a failed first item. Worker immediate verification, skipped settings, final checks and device-count
+assertions are retired. The shared policy algorithm is described in the pipeline section below.
 
 `NetworkWritePayloadBudget` bounds the complete canonical document at 180,000 characters and each
 value at 60,000 (the configured budgets; defaults shown). It omits whole effect/result/verification values, preserves IDs/guards/outcome
@@ -821,6 +925,24 @@ while audit items retain execution truth. Actual read-write confirmation is `non
 is `policy`; dry runs/denials are `none`. No Network server elicitation is attempted.
 See the [Network reference](SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md#network_write-envelope).
 
+The four guarded-write budgets (`network_write`, `plc_write`, `hmi_write`, `vci_write`) share
+`GuardedWriteResponseBudget` in `Safety/Pipeline` for diagnostic omission bookkeeping, canonical
+sizing, the ordered document-omission loop and protected-core construction; each domain's
+`*WritePayloadBudget` remains an adapter that owns its projections and omission priority.
+Diagnostic omission metadata reports the call's resolved document limit, except Network's ordinary
+512-character diagnostic cap, which reports `512`. Admission reserves the worst-case guard shapes
+before binding, using the longest encoded ID, with `N` items:
+
+| Domain | Guard reserve | Diagnostic policy | Document-root omission priority |
+| --- | --- | --- | --- |
+| PLC | `2N+1` | Preserve diagnostics while they fit; compact under pressure | Content diffs, failure import outcomes, verification operations, whole effects; size descending, request-order ties within each priority |
+| Network | `2N+1` | 512-character cap first, then full compaction under pressure | Early batch-result pass retaining recovery evidence; verification checks before effects, then size descending with request-order ties |
+| HMI | `4N+3` | Compact only on document/item pressure; includes `CleanupMessage` | Verification operations, then effects largest first with request-order ties |
+| VCI | `5N+5` | Compact only on document/item pressure | Verification operations, then effects largest first with request-order ties |
+
+Under item pressure PLC drops an effect's content diff before the whole effect. The reserves are
+upper bounds: for HMI, blockers stop a call at 4N, while an applied call has at most 2N+1 guards.
+
 ### Exact host-to-worker selector boundary
 
 Selector resolution happens **twice, independently, on both sides of the process boundary** —
@@ -831,18 +953,20 @@ this is defense-in-depth, the same pattern used for read-only access enforcement
   This resolution produces the `NetworkWriteTargetEvidence` retained in guarded effects and
   preview responses — it never touches Siemens Openness.
 - **Worker side** (`TiaMcpServer.OpennessWorker/Openness/Network/NetworkDeviceConfigurator.cs`):
-  independently matches the same `deviceName`/`nodeId` selector against live Openness objects at
+  independently matches the device/node selector and qualified interface path against live Openness objects at
   the moment of the actual write, walking every nested device item and network interface.
 
 Both sides apply the identical rule: a selector that matches zero, more than one, or a candidate
 whose own identity could not be read all fail closed rather than
-resolving to a first match, a first node, or a name-only guess. The host never forwards a
-pre-resolved object reference to the worker — only the caller's own `deviceName`/`nodeId` (and,
-where applicable, `subnetId`/IO-system `number`) cross the process boundary, so the worker's
-independent resolution is a real second check, not a formality. Host preflight misses are
+resolving to a first match, a first node, or a name-only guess. The host forwards serializable
+selectors and identity evidence, never an Openness object reference. For configure, it can add the
+resolved `InterfacePath`; `NetworkWorkerInvoker.MapSelector` carries that path and other supplied
+selector evidence, alongside device/node identity and applicable subnet/IO-system identity.
+The worker independently resolves and checks this evidence against live objects. Host preflight misses are
 `target_not_found`/`target_ambiguous`, an unsupported or blank subnet `NetworkType` is
 `target_kind_unsupported`, and an unreadable snapshot is `worker_operation_failed`.
-`postcondition_failed` is only late worker-side drift and failed/unverified postchecks.
+`postcondition_failed` covers late worker-side drift, ignored subnet rename and unreadable created
+subnet identity.
 
 Live Openness wrappers are not reference-stable: the same engineering object can surface as two
 distinct CLR instances. Worker identity comparisons (node owner resolve-back, subnet connection evidence,
@@ -884,10 +1008,6 @@ diagnostic independent for every requested name. Public values use only `null`, 
 `boolean`, `integer`, `number`, or `enum`; unsupported CLR objects become `unrepresentable` and
 are never serialized through arbitrary `ToString()` output.
 
-The worker-only `probe_network_object_attributes` method exists solely for the explicitly
-authorized Phase 3 raw-metadata acceptance mode. It is read-only and absent from
-`NetworkOperationCatalog`, the public MCP schema, and host dispatch.
-
 ### Phase 4 subnet lifecycle seam
 
 Phase 4 adds `create_subnet`, `update_subnet`, and `delete_subnet` to `network_write` without a new
@@ -899,7 +1019,7 @@ network_write request
   -> current subnet resolution and canonical safety binding
   -> worker request
   -> SubnetLifecycleService transaction
-  -> post-read/device-count assertion
+  -> transaction-local identity capture / requested rename check
   -> minimal typed canonical result
 ```
 
@@ -917,36 +1037,35 @@ network_write request
   production fields `SubnetName`, `SubnetNetworkType`, `SubnetHighestAddress`,
   `SubnetTransmissionSpeed` (plus the existing `SubnetId` for update/delete) are forwarded through
   three explicit typed client methods, classified `ProjectMutation` in `OperationPolicyCatalog` and
-  denied in read-only mode before any worker call. These fields are distinct from the `Probe*`
-  fields reserved for the internal mutation-probe evidence fixture; production calls never populate
-  a `Probe*` member.
+  denied in read-only mode before any worker call.
 - **`SubnetLifecycleService` transaction**
   (`TiaMcpServer.OpennessWorker/Openness/Network/SubnetLifecycleService.cs`): each of `Create`, `Update`,
   and `Delete` opens exactly one `ExclusiveAccess`/`Transaction`, performs every requested setter,
   and calls `CommitOnDispose()` only after every setter succeeds. Subnet lookup is ordinal, exact-one
   `SubnetId` matching with no fallback to `Name`, index, or connected device. Late zero or multiple
-  worker matches fail as `postcondition_failed`. Delete resolves and type-checks the target inside
+  worker matches fail as `postcondition_failed`. For a requested rename, `Update` compares its
+  already-captured name with the request using ordinal equality before requesting commit. A mismatch
+  fails as `postcondition_failed` without committing the update; this catches an ignored rename
+  without another native getter or worker call. Delete resolves the target once inside
   its transaction, captures a nonblank name from that same object, and only then calls `Delete()`;
-  the mutation cannot use a pre-transaction subnet object. This file is a
-  distinct production implementation from `SubnetLifecycleMutationProbeService`, the internal-only
-  evidence probe behind `probe_subnet_lifecycle_mutations` — the probe is absent from
-  `NetworkOperationCatalog`, the public MCP schema, and host dispatch, exactly like Phase 3's raw
-  metadata probe.
-- **Post-read/device-count assertion**: after the transaction is disposed, the service re-reads the
-  target subnet (or confirms its absence for delete) and re-reads `project.Devices.Count`; any
-  mismatch — including a changed device count — fails with `WorkerFailureCategories.PostconditionFailed`
-  rather than reporting success, and the service never retries automatically.
-- **Typed canonical result** (`SubnetLifecycleResultInfo`): required core `subnetId`, `name`,
-  `networkDeviceCount`, `networkDeviceCountUnchanged`, plus conditional worker `verification`
-  required on the guarded public path. Strict projection preserves failed/unverified postchecks
-  as attempted failures. Root count means `project.Devices.Count`; grouped/ungrouped node/device
-  preservation and detached relationships receive independent identity checks.
+  the mutation cannot use a pre-transaction subnet object.
+- **Identity and completion**: create captures the native ID before commit and returns the requested
+  name; an unreadable ID is `postcondition_failed` after commit. Update returns its transaction-local
+  name; delete returns the identity captured before deletion. Supported target types come from the
+  host snapshot. There is no post-transaction target/count/preservation read-back or automatic retry.
+- **Typed canonical result** (`SubnetLifecycleResultInfo`): required `subnetId`, `name` only. Failed
+  subnet items have `result:null`; shared root verification records completed calls as `trusted`
+  or `superseded` without adding worker verification.
 
 The connected-subnet delete path is implemented through this seam without deleting devices;
-the worker and host capture affected identities/consequences for guards and postchecks. The
-service never calls `Project.Save()` or triggers a hardware compile. Current-candidate live acceptance
-is pending; the dated Phase4 evidence below is historical and does not qualify this migration. Focused static gates verify
-the repaired contract. A historical Phase 4 run applies only to its recorded older commit. The
+the host captures initial affected identities/consequences for guards. The service never calls
+`Project.Save()` or triggers compilation. The [2026-10-29 scoped report](superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+records installed candidate `75c0568` contract 2.0 offline qualification and 17 passing expected live outcomes, including
+the L3 ignored rename. Its mixed-property rollback and native write-interruption limits remain
+unverified. The later host-only raw-outcome validation/tool-help follow-up is verified separately
+offline and adds no installation, native execution or timing evidence. Public `compile_check`
+compiles PLC software and does not qualify hardware configuration.
+A historical Phase 4 run applies only to its recorded older commit. The
 first current-revision live attempt on 2026-09-23 stopped at a TIA safety-permission rejection of
 connected Ethernet deletion. The fresh 2026-09-24 guarded public rerun passed all eight lifecycle
 operations, including both connected deletes; a separate final read observed zero subnets and 81
@@ -956,16 +1075,11 @@ IO-system attributes, and its root count of 10 has no independent pre-Apply base
 `docs/superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md` for the
 observed run.
 
-### Phase 5 temporary IO-system qualification probe
+### Phase 5 qualification evidence and retired Network probes
 
-`probe_io_system_qualification` is a temporary worker-only diagnostic, classified as a project
-mutation and absent from the public MCP schema, host dispatch, and `NetworkOperationCatalog`.
-Its `inspectOwner` mode checks that an IO system has exactly one controller interface
-`DeviceItem` owner. The effectful modes separately prove the deepest strict ancestor
-`DeviceItem` that directly hosts the unique master `PlcSoftware` through
-`SoftwareContainer` and exposes `ICompilable`; they compile that hardware item, not the
-interface owner or containing `Device`. Missing or ambiguous owner, PLC role, compiler
-service, or pre/post identity continuity stops the operation. An applied change commits before post-read and hardware compile; a known post-commit failure must not be reported as rollback.
+The worker-only `probe_network_object_attributes`, `probe_io_system_qualification`, and
+`probe_subnet_lifecycle_mutations` routes are retired. Their historical acceptance reports and
+raw evidence remain available; they do not provide a runnable worker route.
 
 The 2026-09-26 worker-only V21 matrix verified distinct owner and compiler targets for PN-B
 and DP-B, baseline hardware compiles, and bounded one-field edit/restoration evidence. It
@@ -975,10 +1089,12 @@ committed edit made linked PN-name evidence unavailable, and excluded
 `MaxNumberIWlanLinksPerSegment` because the fixture reported `unknownAttribute`.
 The [historical acceptance report](superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md)
 records the qualification limits and final clean reopen; the
-[qualified contract](superpowers/specs/2026-09-24-network-phase5-qualified-contract.md)
-is input to later public slices. This diagnostic has no public safety token or write audit,
-and `update_io_system` is not shipped. Retire the probe with the final live-harness cleanup
-after the later public acceptance work.
+[qualified contract](adr/0003-network-domain-identity-and-subnet-lifecycle.md)
+is input to later public slices. `update_io_system` is not shipped and requires its own
+guarded-pipeline implementation and scope-specific public-path live acceptance. Future IO-system
+work can use the preserved evidence, but cannot call the retired qualification route. No failed
+hardware compile was induced in that qualification; a known post-commit failure must not be
+reported as rollback.
 
 ## 8. Write safety
 
@@ -1014,22 +1130,42 @@ cleanup and automatic opener replay remain absent.
 
 `PlcWriteDomain` implements the guarded runner with `ConfirmsEveryCall=false` and only `block` and
 `info` guards (`PlcGuardDefinitions`), so no mode and no dry run elicits. Audit confirmation is
-`none` in read-write and `policy` in full. `PlcWritePlanner` plans from public reads only (one tag inventory, one project-tree snapshot per
-involved PLC, one export per content item), applies earlier items to an in-call working state, and
-fires guards:
+`none` in read-write and `policy` in full. The principle is that TIA Portal is the authority on its
+own rejections: the host and worker do not re-implement name collisions, existing blocks, existing
+groups or tables, or the default tag table. `PlcWritePlanner` plans from public reads only, and
+only the reads a kept guard or a target pre-flight needs: the tag inventory for tag, table and
+constant targets, a project-tree snapshot only for `delete_block`, `delete_block_group` and OB
+creates, and one export per content item. It applies earlier items to an in-call working state
+(identity overlay and `DependsOn` marking, no collision evaluation) and fires guards:
 
 | Guard | Severity | Fires when |
 | --- | --- | --- |
-| `plc_state_unverifiable` | block | Evidence relevant to the target is incomplete or unreadable (including an incomplete root inventory, which fires for every item) |
-| `plc_name_collision` | block | A new or renamed object collides with an existing or in-call object in the CPU namespace |
-| `plc_block_exists` | block | `create_block` targets an existing block |
-| `plc_ob_singleton_exists` | block | `create_block` creates an OB of a singleton event class whose number an OB already holds, or an earlier item in the call creates |
-| `plc_default_tag_table` | block | `delete_tag_table` targets the default tag table |
-| `plc_attribute_unreadable` | block | A requested external-access flag is unreadable on the current tag |
+| `plc_state_unverifiable` | block | The PLC inventory is incomplete, the update or delete target or what a delete removes is unreadable, the user-constant value an update replaces is unreadable, or the content cannot be exported |
+| `plc_ob_singleton_exists` | block | `create_block` creates an OB of a singleton event class whose number an OB already holds, or an earlier item in the call creates (kept: Portal's own rejection was not reachable through the tool) |
 | `plc_deletes_block` | info | `delete_block` removes the block and its content |
 | `plc_deletes_group_contents` | info | `delete_block_group` removes every block and group inside it |
 | `plc_deletes_table_contents` | info | `delete_tag_table` removes its tags and user constants |
 | `plc_address_overlap` | info | The requested logical address is already used by another tag (exact string match) |
+
+Update and delete targets are resolved before the first mutation (`target_not_found` fails the whole
+call); creates are not, so a create into a missing parent group or folder fails at mutation. A
+Siemens `EngineeringTargetInvocationException` inside a mutation item that reaches `WorkerExecution`
+becomes `engineering_rejected` with `engineeringError`; other Siemens engineering errors remain
+`worker_operation_failed` (see §6 on the worker mapping and §7a on the member). The item's failure is
+projected by the shared `WriteRun`, the audit keeps the actual statuses, and later items are
+`skipped`. Block creation is an XML import (`PlcBlockComposition.Import`), so a duplicate block is
+Portal's import error. The content importers (`update_block_logic`, `update_type_content`) and the exporters catch Siemens exceptions
+and re-wrap them in `WorkerOperationException` without `EngineeringError`, so those paths still report
+`worker_operation_failed`; `Describe` is available to them. Portal silently ignores an `update_tag`
+rename to a colliding name, so `TagMutationService.UpdateTag` applies the rename first, reads
+`Name` back and throws `postcondition_failed` before any other property changes.
+
+Verification (`TrustedWriteVerifier` with `PlcVerificationPolicy`, contract `2.0`) reads back content only: `contentHash` for a
+content item (one re-export, whose hash cannot be predicted because the export carries a generated
+id), `trusted` for every other completed item, and `superseded` for an item a later item changed
+again or may have changed after an attempted failure; a failed non-content item has no entry and leaves final state unverified, requiring `plc_read`. The conservative supersede rule treats an unresolved
+`PLC/Name` content target as owned by any later same-name block item or any later group delete on
+that PLC.
 
 Content writes require `expectedContentHash`. The planner compares it with a fresh export in the
 write's format: a mismatch fails the call as `state_changed` at plan time, and the worker re-checks
@@ -1039,8 +1175,7 @@ cannot be written. A content preview may include a bounded `contentDiff` (40 exc
 8,192 characters per side, 32,768 characters per call).
 
 Later items may use objects created earlier in the same call; such items carry `DependsOn` and are
-re-planned just before their own mutation. `PlcWriteVerifier` re-reads every attempted item and
-marks an item whose object a later item changed again as `superseded`. `PlcWritePayloadBudget`
+re-planned just before their own mutation; the runner does not re-plan independent items. `PlcWritePayloadBudget`
 applies the configured value and document budgets (60,000/180,000 by default) and omits whole values.
 Worker resolution uses `PlcSoftwareLocator.FindUnique`, which considers every PLC including grouped
 devices and fails `target_ambiguous` on several matches; the shared target resolvers make
@@ -1057,7 +1192,7 @@ acceptance boundaries.
 ### Guarded write pipeline (foundation and lifecycle)
 
 `TiaMcpServer/Safety/Pipeline/` holds the single-call write pipeline that replaced the token flow.
-The six lifecycle tools, `network_write`, `plc_write` and `hmi_write` use it. Network, PLC and HMI have no server
+The six lifecycle tools, `network_write`, `plc_write`, `hmi_write` and `vci_write` use it. Network, PLC, HMI and VCI have no server
 elicitation; lifecycle read-write confirms every actual call.
 The pipeline is a consistency and safety mechanism. Client-returned acceptance and mode policy
 are recorded separately; client acceptance does not prove that a person saw the consequence.
@@ -1071,7 +1206,30 @@ can make root `success` false while execution statuses and verification truth re
 
 `WriteExecution.RunAsync(domain, call)` owns the order and the safety rules. An
 `IWriteDomain<TItem, TEffect, TVerification, TResponse>` supplies validation, target planning, guard
-evaluation, the mutation, verification, and the response shape. Stages, in order:
+evaluation, the mutation, verification, and the response shape.
+
+`TrustedWriteVerifier<TItem>` shares the completion/supersedence algorithm for PLC, Network, HMI and VCI.
+`IWriteVerificationPolicy<TItem>` supplies object keys, the read tool and any domain read-back.
+A successful item is `superseded` by a later attempted item's equal key or container key unless
+that later failure was a precondition refusal with no result. A non-null failed-item result keeps
+the possibility of mutation even for a normally precondition-only category such as `target_not_found`
+(the HMI R1 case). Such a failure, or a later `engineering_rejected`, can supersede an earlier item;
+the diagnostic says that final state is unverified. Otherwise,
+a policy read-back runs for succeeded or failed items that have one; successful items without one
+are `trusted`, and failed items without one have no entry. Skipped items have no entry.
+`WriteVerification` contains `{success,operations,omission}` with per-entry
+`{operationId,success,check,expected,actual,message}`; success is the conjunction of entries.
+
+`PlcVerificationPolicy` retains the existing object/container keys and content re-export hash
+read-back. `PlcWriteDomain` maps shared `contentHash` entries back to its unchanged public content
+hash members. `NetworkVerificationPolicy` has no read-back. Its configure key includes the
+case-normalized device name, interface path names/positions and ordinal raw node ID; optional type
+evidence does not change identity. Update/delete share the ordinal subnet key; a create has no
+pre-call subnet key. `HmiVerificationPolicy` also has no read-back and uses flat effect keys as
+described in §7a. `VciVerificationPolicy` has no read-back and uses one case-insensitive workspace
+key, so a later attempted item can supersede any earlier success on that workspace.
+
+Pipeline stages, in order:
 
 1. **Validate** before any worker call: at least one operation, non-blank unique `operationId`s,
    and the domain's own validation. There is no agent confirmation list.
@@ -1091,7 +1249,9 @@ evaluation, the mutation, verification, and the response shape. Stages, in order
    full uses policy without server elicitation. After an accepted prompt, re-plan and re-evaluate
    under the same binding lease before dispatch: the TIA UI can edit while the prompt is visible.
 6. **Mutate** sequentially. The first item that does not succeed stops the call; later items are
-   `skipped`. A dependent item is re-planned just before its own mutation.
+   `skipped`. A domain that declares `DependsOn` re-plans that item just before its own mutation;
+   HMI plans declare no dependencies and use their initial caller-order simulation; VCI leaves later
+   same-workspace items unplanned and declares no `DependsOn`.
 7. **Verify, compose, audit.** `VerifyAsync`, then `Compose`, then one audit record; the tool result
    carries the same canonical text that was audited. `isError` is true only for `error` and
    `blocked`; a write that ran and failed reports `success: false` under `applied`.
@@ -1119,6 +1279,9 @@ In read-write a newly discovered acknowledge-severity guard not covered by initi
 acceptance also stops the item; full satisfies that severity by policy. Lifecycle calls are
 single-item; `plc_write` uses this mechanism for items that depend on objects created earlier in
 the call. A re-planned guard identical to one already reported for the item is reported once.
+HMI simulates in-call dependencies during initial planning and does not enter this re-plan path.
+VCI also stays out of this path: only the first item per workspace is planned, and dependents
+execute without their own inventory or evidence guards.
 
 #### Partial writes
 
@@ -1228,3 +1391,5 @@ Update this document when tool registration, operation classification, access
 modes, worker launch arguments, binding rules, or write-safety behavior changes.
 The architecture must describe the explicitly registered runtime surface, not
 only the set of decorated tool classes present in the assembly.
+
+When a change reverses or narrows a recorded decision, add an ADR that supersedes it in the same PR and update the affected sections here; do not edit the old ADR's body.

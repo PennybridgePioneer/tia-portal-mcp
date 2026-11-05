@@ -6,10 +6,8 @@ using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Json;
 using TiaMcpServer.OperationBatches;
 using TiaMcpServer.ProjectLifecycle;
-using TiaMcpServer.Safety;
 using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Tests.TestSupport;
-using TiaMcpServer.Tests.Worker;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
@@ -103,8 +101,7 @@ public sealed class LifecycleResponseBudgetTests
         try
         {
             using var uiOpen = new FakeWorkerUiOpenProject(path);
-            using var client = new OpennessWorkerClient(new ProjectSessionBinding(path), logger: null,
-                workerExecutablePath: FakeWorkerLocator.Locate(), accessPolicy: new(McpAccessMode.Full));
+            using var client = FakeWorkerClients.Create(McpAccessMode.Full, binding: new ProjectSessionBinding(path));
             var audit = new Audit();
             var execution = new WriteExecution(new OpennessWriteBindingGate(client), audit,
                 LifecycleWriteDomain.Catalog, TimeProvider.System);

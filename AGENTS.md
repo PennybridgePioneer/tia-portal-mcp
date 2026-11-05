@@ -4,54 +4,6 @@ MCP server for Siemens TIA Portal V21. Exposes 8 tools in read-only, 19 in read-
 
 ## Two-process architecture (critical to understand)
 
-`bind_project` retains default/null/explicit `bind` behavior and adds six explicit inspections:
-`list_portals`, `list_server_connections`, `list_server_groups`, `list_server_projects`,
-`list_local_sessions`, `get_lock_state`. Current counts are 8/19/19; PR3 had 7/17/17. Discovery never adopts; inventory
-uses persistent Portal-only attachment, never switches/adopts/opens a project. Selectors are exact
-raw-key validated; root group requires `{isRoot:true,name:null}`. Verified foreign-PID refusal is
-local/NotSent and preserves binding/cursors; genuine context/transport loss still invalidates.
-Sessions cover `currentMachineCurrentUser`; locks are non-atomic observations. Typed inspection
-is conditional inside the budgeted binding value (60,000/180,000 characters by default), not a new envelope.
-Inspection adds no lifecycle elicitation/write audit or session mutation.
-See [Multiuser reference](docs/SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md).
-PR3 received exact live authorization on 2026-10-06. All six inspection actions succeeded against
-three disposable session copies and a standalone AP21; all five remote inventories also succeeded
-with zero open projects. Healthy verified binding/cursors and worker-loss invalidation/recovery
-were observed. The maintainer accepted PR3 live testing as finished and passed on 2026-10-06;
-unexecuted cases are retained as non-blocking evidence limitations in the
-[live acceptance report](docs/superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md).
-
-PR4 selects typed already-open local owners by observed `.amc21` identity, supports basic local
-status/startup assertions and explicit file-only `.als21` opening through the guarded lifecycle
-pipeline. Cold adoption has null ALS provenance and no worker ownership; known same-ALS reuse
-requires continuous owner identity. Conditional local `context` includes descriptive capabilities;
-mode remains unknown, remote identity null and active connection unknown. Terminal operations and
-the same-server-project session-identity follow-up remain open.
-Worker-owned local sources block a different open even when clean; borrowed sources require
-proved preservation. No generic session close or automatic terminal cleanup is added.
-Candidate `3772eda` is offline qualified and scoped-live accepted by maintainer decision on
-2026-10-08. Both read-write offline actual opens required Siemens dialog dismissal, failing the
-original noninteractive expectation; full offline/headless/race and other matrix cases remain
-unexecuted. See the [PR4 report](docs/superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md).
-
-PR5 enables content reads (`browse_project_tree`, `plc_read`, `network_read`,
-`read_cross_references`, `hmi_read`) on local sessions. Read handlers use the worker's
-`WithEngineeringRoot` (`ProjectBase`).
-`ProjectCapabilityCatalog.OperationFor` is the only worker-method→capability map for both host
-and worker gates; a new worker method must map through it. Live verified on 2026-10-09 against one
-cold-adopted local session and a standalone regression; see the
-[PR5 report](docs/superpowers/acceptance/reports/2026-10-09-multiuser-pr5-live-verification.md).
-
-PR6 enables `plc_write`, `network_write`, `compile_check` and `save_project` on local sessions.
-Every content handler, write and compile included, runs through `WithEngineeringRoot`; content
-services take `ProjectBase`, and there is no standalone-only content helper. A local
-`save_project` calls `LocalSession.Save()` with the identity re-check adjacent to the save; it
-never updates from or checks in to the Project Server, and read-write confirmation says so.
-`StandaloneOnlyProbes` keeps the IO-system and subnet qualification probes standalone-only.
-Create, save-as, archive and close stay standalone-only. Live verified on 2026-10-09 against
-Multiuser and Exclusive cold-adopted sessions in `full` mode; see the
-[PR6 report](docs/superpowers/acceptance/reports/2026-10-09-multiuser-pr6-live-verification.md).
-
 The host (`TiaMcpServer`, net10.0) and the worker (`TiaMcpServer.OpennessWorker`, net48) are separate processes. Siemens Openness DLLs use .NET Framework remoting and **cannot run in a .NET 10 process** — this is why the split exists.
 
 - Host communicates with worker via newline-delimited JSON over stdin/stdout
@@ -62,12 +14,47 @@ The host (`TiaMcpServer`, net10.0) and the worker (`TiaMcpServer.OpennessWorker`
 
 **Do not try to run Openness code directly from the host process** — always go through the worker.
 
+## Multiuser (inspection and local sessions)
+
+`bind_project` retains default/null/explicit `bind` behavior and adds six explicit inspections:
+`list_portals`, `list_server_connections`, `list_server_groups`, `list_server_projects`,
+`list_local_sessions`, `get_lock_state`. Discovery never adopts; inventory
+uses persistent Portal-only attachment, never switches/adopts/opens a project. Selectors are exact
+raw-key validated; root group requires `{isRoot:true,name:null}`. Verified foreign-PID refusal is
+local/NotSent and preserves binding/cursors; genuine context/transport loss still invalidates.
+Sessions cover `currentMachineCurrentUser`; locks are non-atomic observations. Typed inspection
+is conditional inside the budgeted binding value (60,000/180,000 characters by default), not a new envelope.
+Inspection adds no lifecycle elicitation/write audit or session mutation.
+See [Multiuser reference](docs/SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md).
+
+Binding selects typed already-open local owners by observed `.amc21` identity, supports basic local
+status/startup assertions and explicit file-only `.als21` opening through the guarded lifecycle
+pipeline. Cold adoption has null ALS provenance and no worker ownership; known same-ALS reuse
+requires continuous owner identity. Conditional local `context` includes descriptive capabilities;
+mode remains unknown, remote identity null and active connection unknown.
+Worker-owned local sources block a different open even when clean; borrowed sources require
+proved preservation. No generic session close or automatic terminal cleanup is added.
+
+Content reads (`browse_project_tree`, `plc_read`, `network_read`,
+`read_cross_references`, `hmi_read`) work on local sessions. Read handlers use the worker's
+`WithEngineeringRoot` (`ProjectBase`).
+`ProjectCapabilityCatalog.OperationFor` is the only worker-method→capability map for both host
+and worker gates; a new worker method must map through it.
+
+Local sessions also support `plc_write`, `network_write`, `compile_check` and `save_project`.
+Content handlers, write and compile included, use `WithEngineeringRoot`, or `WithActiveContext`
+when native access or transactions also need the Portal handle. Content services take `ProjectBase`;
+capability gates determine eligible container kinds. A local
+`save_project` calls `LocalSession.Save()` with the identity re-check adjacent to the save; it
+never updates from or checks in to the Project Server, and read-write confirmation says so.
+Create, save-as, archive and close stay standalone-only.
+
 ## Solution structure
 
 | Project | TFM | Role |
 | --------- | ----- | ------ |
 | `TiaMcpServer` | net10.0 | MCP stdio server, tool registration, guarded write pipeline, structured batch engine, CLI (doctor) |
-| `TiaMcpServer.Contracts` | netstandard2.0 | Shared DTOs (`WorkerRequest`, `WorkerResponse`, all info/result types) |
+| `TiaMcpServer.Contracts` | netstandard2.0 | Shared contracts, catalogs and Siemens-free logic (`WorkerRequest`, `WorkerResponse`, all info/result types) |
 | `TiaMcpServer.OpennessWorker` | net48 | Worker that loads `Siemens.Engineering.*`, handles all TIA Portal operations |
 | `TiaMcpServer.Tests` | net10.0 | xunit tests; links host source files directly via `<Compile Include>` (not a project reference) |
 | `TiaMcpServer.FakeWorker` | net10.0 | Scripted worker stand-in for IPC integration tests |
@@ -77,8 +64,14 @@ The host (`TiaMcpServer`, net10.0) and the worker (`TiaMcpServer.OpennessWorker`
 ```powershell
 dotnet restore TiaMcpServer.slnx
 dotnet build TiaMcpServer.slnx -m:1          # -m:1 serializes builds — required to avoid parallel worker build conflicts
-dotnet test TiaMcpServer.Tests
+dotnet test TiaMcpServer.Tests --filter "Category!=Packaging"
 ```
+
+Packaging tests (`Category=Packaging`) are excluded from the default run and run in their own CI
+workflow only when packaging files change. When you touch a product `.csproj`,
+`Directory.Build.props`, `global.json`, `scripts/verify-doctor-package.ps1`,
+`scripts/verify-reference-stubs.ps1` or `reference-stubs/`, also run
+`dotnet test TiaMcpServer.Tests --filter "Category=Packaging"`.
 
 CI/stub build (no TIA Portal needed):
 
@@ -108,31 +101,41 @@ zero server elicitation in read-write, full, or dry runs. The generic batch tool
 (`preview_write_batch`/`apply_write_batch`), safety tokens, the token core and the legacy write audit
 stream were removed.
 
-- **PLC writes**: `plc_write(operations, dryRun=false)` executes by default; set `dryRun:true` for preview. Same binding, ordering, 50-item, stop-at-first-failure and no-rollback rules as Network; the 14 operations are listed in the tool description. Content writes pass `content` plus `expectedContentHash` from a `plc_read` in the same format; stale content is `state_changed`, and content over the value budget (60,000 characters by default, raised with `--max-item-chars`) has no hash and cannot be written. Guards are block (`plc_name_collision`, `plc_block_exists`, `plc_ob_singleton_exists`, `plc_default_tag_table`, `plc_state_unverifiable`, `plc_attribute_unreadable`) or info (`plc_deletes_block`, `plc_deletes_group_contents`, `plc_deletes_table_contents`, `plc_address_overlap`). Later items may depend on objects created earlier in the call (`dependsOn`); verification marks overwritten items `superseded`. Audit confirmation is `none` in read-write and `policy` in full.
-- **Network writes**: `network_write(operations, dryRun=false)` executes by default; explicitly set `dryRun:true` for preview. Require exact already-open verified binding and one project; process up to 50 unique-ID items in caller order, stop at first failure, never roll back or replay. Connected deletion is informational; incomplete consequence inventory blocks every mode. Reject legacy `confirm`, `acknowledge`, unknown roots and nonboolean `dryRun`, like every argument-shape error in all 19 tools, with the tool's canonical document (`validation_error`, `isError:true`) and no audit record. Entered validation/binding/guard denials use a canonical root error and one audit v2 record. Read-write actual confirmation is `none`, full actual is `policy`; previews/denials use `none`, and info/block satisfaction is null.
+- **PLC writes**: `plc_write(operations, dryRun=false)` executes by default; set `dryRun:true` for preview. Same binding, ordering, 50-item, stop-at-first-failure and no-rollback rules as Network; the 14 operations are listed in the tool description. Content writes pass `content` plus `expectedContentHash` from a `plc_read` in the same format; stale content is `state_changed`, and content over the value budget (60,000 characters by default, raised with `--max-item-chars`) has no hash and cannot be written. Write contract `2.0` (`plc_read` stays `1.0`): creates are not pre-checked for collisions, and collision directions beyond the cases recorded in the PLC acceptance report are unverified. A native `EngineeringTargetInvocationException` in a mutation worker method fails `engineering_rejected` with `engineeringError` (see Failure categories below). Guards are block (`plc_ob_singleton_exists`; `plc_state_unverifiable`, narrowed to incomplete inventory, unreadable update/delete targets, delete consequences or constant values, and unexportable content) or info (`plc_deletes_block`, `plc_deletes_group_contents`, `plc_deletes_table_contents`, `plc_address_overlap`). Update and delete targets still pre-flight `target_not_found`; a create into a missing parent group or folder fails at mutation. Later items may depend on objects created earlier in the call (`dependsOn`, replanned before their mutation). Verification reads back content only: `trusted` for completed non-content items, `contentHash` (a re-export, equal to the next `plc_read` hash and usable as the next `expectedContentHash`, never computable from the content) for content updates, `superseded` for overwritten items (a short-path `update_block_logic` is conservatively superseded by a later same-name block item or any group delete on that PLC); a failed non-content item has no verification entry, so inspect it with `plc_read`. `update_tag` applies a rename first and reads `Name` back, because Portal silently ignores a colliding rename: the item fails `postcondition_failed` before any other property changes. Audit confirmation is `none` in read-write and `policy` in full.
+- **Network writes**: `network_write(operations, dryRun=false)` executes by default; explicitly set `dryRun:true` for preview. Write contract `2.0` (`network_read` stays `1.0`). Require exact already-open verified binding and one project; process up to 50 unique-ID items in caller order, stop at first failure, never roll back or replay. One hardware snapshot plans the call; no per-item re-planning or verification read-back. Connected deletion is informational; incomplete consequence inventory blocks every mode. Delete effects list initial connections and omit nodes connected earlier in the same call. Configure stops at the first native rejection in Address, SubnetMask, auto-generation, PN name, Subnet, IoSystem order; a carried typed failure result retains `deviceName`, `appliedSettings`, `messages`, and earlier settings may remain applied. Native exception type determines `engineering_rejected` versus `worker_operation_failed` (below). Completed items receive `trusted` or `superseded`; failed/skipped items have no verification entry. A requested subnet rename is compared with the already-read name before commit: a silently ignored rename fails `postcondition_failed`. See the [Network reference](docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md). Reject legacy `confirm`, `acknowledge`, unknown roots and nonboolean `dryRun`, like every argument-shape error in all 19 tools, with the tool's canonical document (`validation_error`, `isError:true`) and no audit record. Entered validation/binding/guard denials use a canonical root error and one audit v2 record. Read-write actual confirmation is `none`, full actual is `policy`; previews/denials use `none`, and info/block satisfaction is null.
 - **Project lifecycle writes** (`open_project`, `create_project`, `save_project`, `save_project_as`, `archive_project`, `close_project`): available in read-write and full. `dryRun=true` resolves targets, effects, and guards without mutation or elicitation. Every actual read-write call requires one form elicitation `accept` plus boolean `confirm:true`, even with only info guards or none. Missing capability, decline, cancel, timeout, or transport failure denies with `access_denied`. Full runs without server elicitation and satisfies acknowledge guards by policy. Block guards stop the call in every mode. Public confirmation arguments and safety tokens are absent.
-- **HMI writes**: `hmi_write(operations, dryRun=false)` provides nine create/update/delete operations for Unified tag tables, tags and discrete/analog alarms, on standalone and bound local-session roots. Same 50-item, ordered, stop-at-first-failure/no-batch-rollback pipeline; existing connections only. Guards block collisions/incomplete evidence and inform about deleted contents/references. Initial delete planning caps cross-reference queries at 200; dependent rechecks are separate. Failed creates attempt identity-checked cleanup; failed updates retain applied properties. Public reads/Validate verify results; mutations invalidate the HMI's snapshots. Read contract remains 1.1, write contract 1.0. Existing-tag rebinding that introduces a new alarm member requires update, read, then a second write call. Direct tag case-only rename can fail natively. See [HMI reference](docs/SupportedOperations/HMI_OPERATIONS_SUMMARY.md) and [scoped acceptance](docs/superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md). Retained locator entries still require fresh uniqueness traversal and clear on next locator use after owner change; maintainer chose to retain them and leave O1 open.
-- **VCI**: `vci_read` (three operations, all modes) and `vci_write` (six operations, writable modes) require a verified standalone project. Writes execute by default, preview with `dryRun:true`, use 1–50 unique-ID items and stop after the first failed item without batch rollback or server elicitation. Scope expansion calls native VCI only on leaves. Planning never reads status; sync uses `GetStatus()`, fresh owner checks and a plain adjacent recheck for workspace sync. Import prefilters before one ExclusiveAccess transaction and needs `compile_check` after success; saving the project persists workspaces and mappings. Export safety scans grow with leaves × mappings; `SimaticSD` export can crash Portal. A matching timeout breadcrumb and `portal_lost` retain attempted-leaf context, invalidate binding and require explicit recovery. See the [VCI reference](docs/SupportedOperations/VCI_OPERATIONS_SUMMARY.md) and [scoped live report](docs/superpowers/acceptance/reports/2026-10-16-vci-tools-live-acceptance.md).
+- **HMI writes**: `hmi_write(operations, dryRun=false)` provides nine create/update/delete operations for Unified tag tables, tags and discrete/analog alarms, on standalone and bound local-session roots. Read contract stays 1.1; write contract is 2.0. The 50-item ordered pipeline stops at the first failure without batch rollback. One initial public-read evidence set per HMI plans the call; its reads are sequential and non-atomic. There is no per-item re-plan, worker read-back or automatic Validate. Three guards remain: incomplete evidence blocks; deleted contents/references inform. Initial delete planning caps cross-reference queries at 200. Collision, member/reference existence, existing-connection and bound-tag `dataType` semantic refusals are removed; request shape still requires `plcTag` with `connection` and `plcTag` or `dataType` for a create. Failed creates attempt identity-checked cleanup; failed updates retain changes. Typed Siemens failures carry `engineeringError` except for `portal_lost`, which takes precedence; a partial outcome is conditional on writer allocation. `appliedProperties` lists completed stages, not atomic properties: a failed stage can already have changed a culture. Shared verification marks completed items `trusted` or `superseded`; an outcome-bearing failed attempt can supersede earlier success even with `target_not_found`. Inspect public reads, Validate and HMI UI compile separately; mutations invalidate read snapshots. The rebind/read/second-call member restriction is removed. Direct tag case-only rename can fail natively; native connection-only assignment remains unprobed. See [HMI reference](docs/SupportedOperations/HMI_OPERATIONS_SUMMARY.md). Retained locator entries still require fresh uniqueness traversal and clear on next locator use after owner change.
+- **VCI**: `vci_read` (three operations, all modes, contract `1.0`) and `vci_write` (six operations, writable modes, contract `2.0`) require a verified standalone project. Writes execute by default, preview with `dryRun:true`, use 1–50 unique-ID items and stop after the first failed item without batch rollback or server elicitation. Typed native failures carry `engineeringError`; outcomes list up to 20 leaf failures in encounter order with 500-character messages and `failuresOmitted`, without capping counts. Import prefilter failures can precede synchronization failures, so recording order is not global scope order. Export leaves existing-file and mapping-key behavior to Portal: native overwrite, companion-file deletion and disruption of another mapping are accepted possibilities. Workspace conflict protection compares exact roots only (case-insensitive, trailing separators ignored); duplicate names reach Portal and nested roots are allowed. Directory segments and containment remain guarded; leaves retain only path-boundary/ADS checks. Length counts the complete path up to 259 characters, with `.xml` taking four characters and other formats reserving eight. Only the first item per case-insensitive workspace is planned; dependents get no inventory, counts, evidence guards or re-plan, while operation info guards remain. Shared verification reports `trusted`/`superseded` without native read-back; failed items have no entry. Scope expansion calls native VCI only on leaves. Planning never reads status; sync uses `GetStatus()`, fresh owner checks and a plain adjacent recheck for workspace sync. Import prefilters before one ExclusiveAccess transaction and needs `compile_check` after success; saving the project persists workspaces and mappings. `SimaticSD` export can crash Portal. A matching timeout breadcrumb and VCI's direct `portal_lost` path retain attempted-leaf context, invalidate binding and require explicit recovery. See the [VCI reference](docs/SupportedOperations/VCI_OPERATIONS_SUMMARY.md).
 - Planning, mutation, verification, and audit run under one pinned project-binding lease. Lifecycle uses explicit preparation and the same lease, re-resolving state after elicitation so an accepted consequence cannot silently change.
 - Lifecycle returns one canonical document with typed `result` and `verification`; rejection has top-level `error` and `isError:true`, while attempted mutation/verification failure has `success:false`, `error:null`, and `isError:false`. Inspect possible mutation before retrying.
 - Lifecycle calls append one audit v2 record, including dry runs and blocked calls, under `%LOCALAPPDATA%\TiaMcpServer\audit`; confirmation records `user`, `policy`, or `none`, and guard satisfaction is `user`, `policy`, or null. Client-returned acceptance does not prove a human saw a prompt.
 - The removed startup switch is rejected with: `--confirm-with-user was removed. Confirmation follows the access mode: read-write asks for every lifecycle call; use --access-mode full to run lifecycle tools without prompts.`
 - Doctor reports Warning for an unbound writable session with remediation naming `bind_project`. Project-tree cursors reject binding ID/revision changes as `cursor_binding_mismatch`.
-- **Portal loss**: `Program.Execute` delegates to `WorkerExecution`: `NonRecoverableException` maps to `portal_lost` across worker domains; an escaping `EngineeringException` does too only when the session observed unexpected disposal of a current Portal attachment during that execution. Deliberate detach, stale callbacks and earlier disposal do not qualify; classification uses cached event evidence, never message matching or native liveness probes. The host invalidates verified binding/cursors without replay. Broad Network recovery, XML-bundle export, cached HMI liveness and Multiuser inventory exclude fatal loss through `OpennessExceptions.IsRecoverable`; original fatal inventory exceptions survive final identity checks. Strict HMI discovery preserves original engineering exceptions; lenient inventory diagnostics remain unchanged. The locator evicts entries on a different managed root handle without native equality; this is cache ownership, never a binding identity check. Existing narrower property policies, typed post-mutation failures, cleanup warnings and completed-operation stamping retain their contracts. VCI's writer keeps its outcome-bearing mapping. The [B-16/Q3 record](docs/superpowers/plans/2026-10-19-worker-portal-loss.md) records scoped Network/PLC/VCI/local-session read evidence and the two HMI fixes with offline regressions. Installed `2fb5e9a` passed a scoped standalone HMI read interruption: `portal_lost`, immediate cursor invalidation and recovery with the same worker. The maintainer accepted B-16/Q3 live testing as finished within the documented scope on 2026-10-20; broader native fault locations and write interruptions remain explicit untested limits.
+- **Portal loss**: `Program.Execute` delegates to `WorkerExecution`: `NonRecoverableException` maps to `portal_lost` across worker domains; an escaping `EngineeringException` does too only when the session observed unexpected disposal of a current Portal attachment during that execution. Deliberate detach, stale callbacks and earlier disposal do not qualify; classification uses cached event evidence, never message matching or native liveness probes. The host invalidates verified binding/cursors without replay. Broad Network recovery, XML-bundle export, cached HMI liveness and Multiuser inventory exclude fatal loss through `OpennessExceptions.IsRecoverable`; original fatal inventory exceptions survive final identity checks. Strict HMI discovery preserves original engineering exceptions; lenient inventory diagnostics remain unchanged. The locator evicts entries on a different managed root handle without native equality; this is cache ownership, never a binding identity check. Existing narrower property policies, typed post-mutation failures, cleanup warnings and completed-operation stamping retain their contracts. VCI's writer keeps its outcome-bearing mapping. Broader native fault locations and write interruptions are untested.
 - **No token-bound write surfaces.** Tokens are retired in favor of one guarded single-call
   pipeline (validate, verified binding, resolve targets, guards, `dryRun`, mutate, verify, audit).
   A new write domain builds on that pipeline (`Safety/Pipeline`), as `plc_write` and
   `network_write`, `hmi_write` and `vci_write` do; do not reintroduce a snapshot reader, `SafetyRead` catalog, or token.
 
-Network read/write roots declare `contractVersion:"1.0"`, warnings arrays and explicit nulls.
+Network read roots declare `contractVersion:"1.0"`; write roots declare `contractVersion:"2.0"`.
+Both retain warnings arrays and explicit nulls.
 Write phases are `preview`, `applied`, `blocked`, `error`; attempted failures have `error:null`
-and MCP `isError:false`. Sparse applied/skipped settings keys are `Address`, `SubnetMask`,
-`PnDeviceNameAutoGeneration`, `PnDeviceName`, `Subnet`, `IoSystem`; effect settings and checks split
-`IoSystem` into scalar `IoSystemSubnet`/`IoSystemNumber`. A requested skip fails the item/call but
-retains typed results and gets a final preservation check. Verification `identity` and
-`finalChecks[].subject` are typed objects with explicit nulls, never interpolated names;
-`verification.success:true` with root `success:false` is by design. Host preflight selector misses
-are `target_not_found`/`target_ambiguous`; `postcondition_failed` is only late worker drift/postchecks.
+and MCP `isError:false`. Sparse `appliedSettings` keys are `Address`, `SubnetMask`,
+`PnDeviceNameAutoGeneration`, `PnDeviceName`, `Subnet`, `IoSystem`; effect settings split
+`IoSystem` into scalar `IoSystemSubnet`/`IoSystemNumber`. Effect `currentSettings` are snapshot
+strings/nulls without inspection metadata. Shared verification is `{success,operations,omission}`;
+entries are `{operationId,success,check,expected,actual,message}` with `trusted` or `superseded`,
+without native read-back. Configure keys include device, interface names/positions and raw node ID;
+optional type evidence does not change identity. A later attempted item can supersede an earlier
+success even when it fails after possible mutation; precondition refusals do not supersede.
+Failed/skipped Network items have no entry, so `verification.success:true` with root `success:false`
+is by design. Immediate verification, `skippedSettings`, `finalChecks` and device-count fields are
+retired. Host preflight selector misses are `target_not_found`/`target_ambiguous`;
+`postcondition_failed` covers late worker drift, unreadable created subnet identity and ignored
+subnet rename (plus PLC's `update_tag` rename read-back).
+
+Failure categories from Siemens: `engineering_rejected` is an `EngineeringTargetInvocationException` thrown during a mutation worker method (`OperationPolicyCatalog` `ProjectMutation`); the mutation flag spans the entire method, including connection, identity and target checks before any native write, so this category does not prove a setter/create was reached. VCI deliberately classifies its read-only `create_workspace` planning recheck as a read: even an `EngineeringTargetInvocationException` there remains `worker_operation_failed` with `engineeringError`. Every other Siemens `EngineeringException` stays `worker_operation_failed`; reads never produce `engineering_rejected`, and `portal_lost` wins over both. The type decides, never message text (messages follow the Portal UI language). Both carry the conditional `engineeringError {type, message, inner[]}` (message cut at 4,000 characters, chain at 8, silently). The shared item-failure projection copies it for every write tool. `WorkerExecution.Classify`/`Describe` serve the shared catch and Network configure wrap sites; the latter produce `WorkerOperationException.EngineeringError` and `ConfigureNetworkDeviceOutcome`. A wrapped engineering failure is also checked for current-execution Portal disposal; `portal_lost` retains its partial configure outcome and invalidates binding. Other Network mutation paths and PLC tag, table, group, block-create and delete paths can reach the shared Siemens catch. HMI and VCI write wraps preserve classification and `engineeringError` alongside their typed partial outcomes; `portal_lost` takes precedence and retains an available outcome without `engineeringError`. Only PLC content importers (`update_block_logic`, `update_type_content`) still flatten Siemens failures without producing this evidence. Open follow-ups are in `docs/IMPROVEMENT_LOG.md`.
+`PersistentWorkerTransport` validates raw `configureNetworkDeviceOutcome` with `NetworkPayloadContract.ValidateEnvelopeOutcome` before the permissive `WorkerJson.Envelope` reader. Wrongly cased/duplicate outcome roots or missing/unknown/wrongly cased/duplicate members in a non-null outcome fail `protocol_error` without publishing the rejected evidence. An absent or explicit-null outcome remains allowed and leaves applied state unknown; do not normalize malformed recovery evidence into an apparently empty applied subset.
 Worker identity comparisons of live Openness objects (owner resolve-back, ancestor containment, read-selector interface-owner diagnostics) use `object.Equals`, never `ReferenceEquals`; the cycle guards over live ancestor/owner hierarchies keep `ReferenceEquals`.
 Budget complete canonical responses at 180,000 characters and individual values at 60,000 by default.
 Those are `StructuredOperationBatchPayloadBudget.Default*Chars`; `MaxItemChars`/`MaxDocumentChars` are the
@@ -146,12 +149,12 @@ whole diagnostic/value omissions can make delivery success false while trusted e
 verification summaries remain true. Audit stores exact delivered document/hash and actual item statuses.
 Inspect with original exact selectors before retry; omission metadata is not a selector.
 
-## Structured JSON contract rules (Network Phase 2 and beyond)
+## Structured JSON contract rules
 
-`network_read`/`network_write` were the first tools on the opt-in canonical JSON contract
-(`TiaMcpServer/Json/CanonicalJson.cs`, `TiaMcpServer/Tools/StructuredToolResult.cs`,
-`TiaMcpServer/OperationBatches/StructuredOperationBatch*.cs`), and `browse_project_tree`, `plc_read` and `read_cross_references` also use it. These
-rules are durable for any future tool that migrates onto it — not just Network:
+The canonical JSON contract lives in `TiaMcpServer/Json/CanonicalJson.cs`,
+`TiaMcpServer/Tools/StructuredToolResult.cs` and
+`TiaMcpServer/OperationBatches/StructuredOperationBatch*.cs`. These rules bind every tool on it
+and any future tool that migrates onto it:
 
 - **Reuse the shared gate.** A new structured tool builds on `StructuredToolResult` /
   `StructuredOperationBatch`; do not hand-roll a parallel canonical-JSON mechanism for a new
@@ -172,13 +175,11 @@ rules are durable for any future tool that migrates onto it — not just Network
   when it appears. Do not hand-write required-member lists.
 - **No nested JSON strings.** A migrated tool's operation results are real JSON objects/arrays
   under the response document, never an escaped JSON string a caller has to parse a second time.
-  This is exactly the Phase 1 defect Phase 2 removed for Network.
 - **Every tool is structured or registered as legacy.**
   `TiaMcpServer.Tests/Tools/ToolOutputContractConformanceTests.cs` fails when a tool is neither
   on this contract nor listed in its legacy register with a reason. When a tool migrates, remove it
   from that register and add a success probe and a rejection probe. The target envelope and
-  migration order are in `docs/roadmap/json-contract.md`. Every registered tool is structured today,
-  so the register is empty; the three batch tools were split into `plc_read`/`plc_write`.
+  migration order are in `docs/roadmap/json-contract.md`.
 
 See `docs/ARCHITECTURE.md` §7a for the full seam description and the exact host-to-worker
 selector boundary, and `docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md` for the concrete
@@ -191,8 +192,17 @@ Network contract these rules describe in the abstract.
 - **HMI worker methods** are named `hmi_<operation>` (e.g. `hmi_list_tag_tables`) because `OperationPolicyCatalog` is one flat namespace and PLC already owns `list_tag_tables`/`create_tag`/...; `HmiOperationCatalog.WorkerMethod` is the single mapping. The worker method names live in `TiaMcpServer.Contracts/Hmi` (`HmiReadMethods.All`/`HmiWriteMethods.All`) and feed `OperationPolicyCatalog`, `ProjectCapabilityCatalog` and the worker dispatch switch; `HmiOperationCatalog.WorkerMethod` stays the public-to-worker map, and tests pin the two against each other. Read parameters travel in `WorkerRequest.HmiQuery`; the nine writes use `WorkerRequest.HmiWrite` and map to the `hmi_write` capability through `ProjectCapabilityCatalog.OperationFor`. Every HMI content handler uses `WithEngineeringRoot`. Classic HMIs (type name `Siemens.Engineering.Hmi.HmiTarget`) fail `target_kind_unsupported`; the worker does not reference `Siemens.Engineering.WinCC.dll`. `hmi_read` is read-only, in every mode, 1-50 items, paging `limit` 1-2000 default 100. Paged operations also return an opt-in snapshot `nextCursor` (host-sealed by `HmiPageCursorCodec`; the worker `HmiSnapshotStore` holds at most 4 snapshots, 10-minute idle lifetime, offset-only scans included). `validate` adds name-scoped `memberTags`, `loggingTags` and `screenItems` (`name` required, not in `all`); see [HMI reference](docs/SupportedOperations/HMI_OPERATIONS_SUMMARY.md).
 - **Worker methods** are dispatched by `method` string in `WorkerRequest` — add new operations in `TiaMcpServer.OpennessWorker/Program.cs` switch expression, then register them in their owning domain catalog and invoker. A worker method is not automatically a public operation; Network, PLC and HMI each use their own request, catalog, and invoker.
 - **Contract types** live in `TiaMcpServer.Contracts` (netstandard2.0) so both host and worker can share them — no Siemens dependencies here
-- **Worker payload JSON** goes through `WorkerJson.SerializePayload`. A new payload contract writes null members and is decoded through the worker-payload reader; `[LegacyNullOmission]` is only for the reasons in `LegacyNullOmissionReason` (a payload that omits nulls cannot go through the reader), and adding or removing one updates `WorkerPayloadNullPolicyRegisterTests`
+- **Worker payload JSON** goes through `WorkerJson.SerializePayload` with `ExplicitNullPayload`. Payload contracts write null members and are decoded through the worker-payload reader. A member omitted when null must be declared conditional with `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]` and registered in `ConditionalMemberRegisterTests`.
 - Siemens DLLs are **never committed** to the repo or the NuGet package
+
+## Plans, specs and evidence (lifecycle)
+
+These rules override the default output locations of the superpowers skills (brainstorming: "Write the validated design (spec) to"; writing-plans: "Save plans to") and of any similar tool.
+
+- Specs go to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, plans to `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, run evidence to `docs/superpowers/evidence/YYYY-MM-DD-<topic>/`. These three directories are a transient per-PR working area: collapsed in diffs and empty on `main`.
+- Never link a transient file from outside `docs/superpowers/`; cite it as "PR #N, commit `<sha>`".
+- Before pushing documentation changes, run `python -I scripts/verify-docs.py --archive-tag docs-archive-2026-10-30` (`python3` on Linux/macOS).
+- Before the PR merges, delete everything you added there in a final commit (`docs: prune working files`). First move what must survive: a lasting decision to `docs/adr/` (one ADR, see its README), behavior to `docs/ARCHITECTURE.md` or `docs/SupportedOperations/`, follow-ups to `docs/IMPROVEMENT_LOG.md`, the live-verification report to `docs/superpowers/acceptance/reports/`, and verified raw Openness call/response files to `docs/superpowers/acceptance/reports/inputs/` (listed in its `README.md`). MCP-level traces, preflights, restoration dumps and timing outputs are not kept; use `scripts/timing/` for measurements.
 
 ## Documentation layout
 
@@ -206,12 +216,13 @@ Network contract these rules describe in the abstract.
 | `docs/SupportedOperations/` | per-area operation reference |
 | `docs/ARCHITECTURE.md` | the design; keep current per its own §11 |
 | `docs/IMPROVEMENT_LOG.md` | engineering log — open follow-ups first, completed work at the end |
-| `docs/superpowers/` | **historical** specs, plans, and acceptance reports — not current documentation |
+| `docs/adr/` | architecture decision records — why the design is as it is; project history |
+| `docs/superpowers/` | live-verification reports under `acceptance/reports/`; transient working area for plans, specs, evidence (empty on `main`) |
 
 Two rules that keep this from re-rotting:
 
-- **A new document under `docs/` is not complete until it is listed in `docs/README.md`.** That
-  index is the entry point; an unlisted document is unreachable in practice.
+- **A new document under `docs/` is not complete until it is reachable from `docs/README.md`**,
+  directly or through the index of its directory. An unreachable document is unfindable in practice.
 - **`README.md` is also the NuGet package readme**, declared via `<PackageReadmeFile>` in
   `TiaMcpServer/TiaMcpServer.csproj`. Relative links do not resolve on nuget.org, so every
   cross-document link in `README.md` must be an absolute
@@ -220,3 +231,13 @@ Two rules that keep this from re-rotting:
 
 `README.md` is a landing page: pitch, tool list, write-safety model, architecture summary, quick
 start, and the documentation map. Procedure belongs in `docs/`, not in the README.
+
+## Project history
+
+This file states current rules only; it records no history. To find why something is the way it is:
+- Decisions and project evolution: `docs/adr/README.md` (each ADR cites the original plans/specs).
+- What was verified live, with scope and limits: the reports in `docs/superpowers/acceptance/reports/`; kept raw Openness evidence in its `inputs/README.md`.
+- Open follow-ups: `docs/IMPROVEMENT_LOG.md`. Current design: `docs/ARCHITECTURE.md`. Per-area contracts: `docs/SupportedOperations/`.
+- Removed plans, specs and evidence: `git show docs-archive-2026-10-30:<path>`; find a path with `git ls-tree -r --name-only docs-archive-2026-10-30 -- docs/superpowers | grep <term>`, or search history with `git log -S"<term>" -- docs/`.
+
+Do not copy acceptance results or dated "live verified" statements into this file.

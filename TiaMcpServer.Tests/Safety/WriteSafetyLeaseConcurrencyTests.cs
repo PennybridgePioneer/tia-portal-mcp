@@ -1,13 +1,10 @@
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
 using TiaMcpServer.Contracts.Project;
 using TiaMcpServer.Contracts.Safety;
 using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Safety;
-using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Tests.TestSupport;
-using TiaMcpServer.Tests.TestUtilities;
 using TiaMcpServer.Tools;
 using TiaMcpServer.Worker;
 using Xunit;
@@ -76,8 +73,8 @@ public sealed class WriteSafetyLeaseConcurrencyTests
 
             var firstResult = await firstApply.WaitAsync(TimeSpan.FromSeconds(10));
             var secondResult = await secondApply.WaitAsync(TimeSpan.FromSeconds(10));
-            var first = LifecycleTestCalls.Document(firstResult);
-            var second = LifecycleTestCalls.Document(secondResult);
+            var first = CanonicalToolDocument.Read(firstResult);
+            var second = CanonicalToolDocument.Read(secondResult);
             LifecycleTestCalls.Succeeded(first);
             LifecycleTestCalls.Succeeded(second);
 
@@ -212,7 +209,6 @@ public sealed class WriteSafetyLeaseConcurrencyTests
                     }
                 }
                 'save_project' {
-                    if ($request.confirm -ne $true) { throw 'Worker mutation fence missing.' }
                     $revision += 1
                     [IO.File]::AppendAllText($MutationLogPath, 'save:' + $revision + [Environment]::NewLine)
                     $status.isModified = $false

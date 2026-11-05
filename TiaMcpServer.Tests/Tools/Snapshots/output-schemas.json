@@ -776,6 +776,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -946,6 +975,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -1150,6 +1183,37 @@
               },
               "temporarySourceState": {
                 "type": "string"
+              }
+            },
+            "default": null,
+            "additionalProperties": false
+          },
+          "engineeringError": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "inner": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
               }
             },
             "default": null,
@@ -2157,6 +2221,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/error/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/error/properties/engineeringError",
                 "default": null
               }
             },
@@ -3224,6 +3292,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -3394,6 +3491,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -3598,6 +3699,35 @@
               }
             },
             "default": null
+          },
+          "engineeringError": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "inner": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "default": null
           }
         },
         "required": [
@@ -3664,6 +3794,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/error/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/error/properties/engineeringError",
                 "default": null
               }
             },
@@ -4531,6 +4665,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -4701,6 +4864,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -4905,6 +5072,37 @@
               },
               "temporarySourceState": {
                 "type": "string"
+              }
+            },
+            "default": null,
+            "additionalProperties": false
+          },
+          "engineeringError": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "inner": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
               }
             },
             "default": null,
@@ -5323,6 +5521,10 @@
               "blockImportOutcome": {
                 "$ref": "#/properties/error/properties/blockImportOutcome",
                 "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/error/properties/engineeringError",
+                "default": null
               }
             },
             "required": [
@@ -5625,6 +5827,35 @@
                         },
                         "temporarySourceState": {
                           "type": "string"
+                        }
+                      },
+                      "default": null
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          }
                         }
                       },
                       "default": null
@@ -6257,6 +6488,37 @@
                       },
                       "default": null,
                       "additionalProperties": false
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "default": null,
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -6740,6 +7002,35 @@
                         }
                       },
                       "default": null
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "default": null
                     }
                   },
                   "required": [
@@ -7100,71 +7391,10 @@
                 "currentSettings": {
                   "type": "object",
                   "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string"
-                      },
-                      "source": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "access": {
-                        "type": "string"
-                      },
-                      "supportedTypes": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "availability": {
-                        "type": "string"
-                      },
-                      "value": {
-                        "type": [
-                          "object",
-                          "null"
-                        ],
-                        "properties": {
-                          "kind": {
-                            "type": "string"
-                          },
-                          "value": true,
-                          "typeName": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "diagnostic": {
-                        "type": [
-                          "object",
-                          "null"
-                        ],
-                        "properties": {
-                          "category": {
-                            "type": "string"
-                          },
-                          "message": {
-                            "type": "string"
-                          },
-                          "clrTypeName": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "additionalProperties": false
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "affectedNodes": {
@@ -7202,12 +7432,6 @@
                     "boolean",
                     "null"
                   ]
-                },
-                "rootDeviceCount": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
                 }
               },
               "required": [
@@ -7216,8 +7440,7 @@
                 "requestedSettings",
                 "currentSettings",
                 "affectedNodes",
-                "connectionsComplete",
-                "rootDeviceCount"
+                "connectionsComplete"
               ],
               "additionalProperties": false
             },
@@ -7471,6 +7694,37 @@
                       },
                       "default": null,
                       "additionalProperties": false
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "default": null,
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -7607,248 +7861,38 @@
                 "operationId": {
                   "type": "string"
                 },
-                "operation": {
+                "success": {
+                  "type": "boolean"
+                },
+                "check": {
                   "type": "string"
-                },
-                "status": {
-                  "type": "string"
-                },
-                "evidence": {
-                  "type": [
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    },
-                    "identity": {
-                      "type": "object",
-                      "properties": {
-                        "deviceName": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "deviceItemName": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "nodeId": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "interfacePath": {
-                          "type": [
-                            "array",
-                            "null"
-                          ],
-                          "items": {
-                            "$ref": "#/properties/effects/items/properties/effect/properties/target/properties/interfacePath/items"
-                          }
-                        },
-                        "interfaceName": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "subnetId": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "checks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          },
-                          "expected": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "observed": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "message": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "message": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "omission": {
-                  "type": [
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "reason": {
-                      "type": "string"
-                    },
-                    "limitChars": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    },
-                    "originalChars": {
-                      "type": "integer"
-                    },
-                    "retryTool": {
-                      "type": "string"
-                    },
-                    "guidance": {
-                      "type": "string"
-                    },
-                    "subject": {
-                      "$ref": "#/properties/effects/items/properties/omission/properties/subject",
-                      "default": null
-                    }
-                  },
-                  "required": [
-                    "reason",
-                    "limitChars",
-                    "originalChars",
-                    "retryTool",
-                    "guidance"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "operationId",
-                "operation",
-                "status",
-                "evidence",
-                "omission"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "finalChecks": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string"
-                },
-                "operationId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "subject": {
-                  "type": [
-                    "object",
-                    "null"
-                  ],
-                  "properties": {
-                    "deviceName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "deviceItemName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "nodeId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "interfacePath": {
-                      "$ref": "#/properties/verification/properties/operations/items/properties/evidence/properties/identity/properties/interfacePath",
-                      "items": {}
-                    },
-                    "interfaceName": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "subnetId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "field": {
-                  "type": "string"
-                },
-                "status": {
-                  "type": "string",
-                  "default": "unverified"
                 },
                 "expected": {
                   "type": [
                     "string",
                     "null"
-                  ],
-                  "default": null
+                  ]
                 },
-                "observed": {
+                "actual": {
                   "type": [
                     "string",
                     "null"
-                  ],
-                  "default": null
+                  ]
                 },
                 "message": {
                   "type": [
                     "string",
                     "null"
-                  ],
-                  "default": null
+                  ]
                 }
               },
               "required": [
-                "kind",
                 "operationId",
-                "subject",
-                "field"
+                "success",
+                "check",
+                "expected",
+                "actual",
+                "message"
               ],
               "additionalProperties": false
             }
@@ -7895,7 +7939,6 @@
         "required": [
           "success",
           "operations",
-          "finalChecks",
           "omission"
         ],
         "additionalProperties": false
@@ -8731,6 +8774,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -8901,6 +8973,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -9176,6 +9252,35 @@
                         },
                         "temporarySourceState": {
                           "type": "string"
+                        }
+                      },
+                      "default": null
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            }
+                          }
                         }
                       },
                       "default": null
@@ -9961,6 +10066,37 @@
                       },
                       "default": null,
                       "additionalProperties": false
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "default": null,
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -10377,6 +10513,35 @@
               }
             },
             "default": null
+          },
+          "engineeringError": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "inner": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "default": null
           }
         },
         "required": [
@@ -10598,6 +10763,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/error/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/error/properties/engineeringError",
                 "default": null
               }
             },
@@ -11465,6 +11634,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -11635,6 +11833,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -12479,6 +12681,35 @@
                   }
                 },
                 "default": null
+              },
+              "engineeringError": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "inner": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "default": null
               }
             },
             "required": [
@@ -12649,6 +12880,10 @@
               },
               "blockImportOutcome": {
                 "$ref": "#/properties/result/properties/failure/properties/blockImportOutcome",
+                "default": null
+              },
+              "engineeringError": {
+                "$ref": "#/properties/result/properties/failure/properties/engineeringError",
                 "default": null
               }
             },
@@ -12929,6 +13164,37 @@
                         },
                         "temporarySourceState": {
                           "type": "string"
+                        }
+                      },
+                      "default": null,
+                      "additionalProperties": false
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "default": null,
@@ -13478,6 +13744,37 @@
                         },
                         "temporarySourceState": {
                           "type": "string"
+                        }
+                      },
+                      "default": null,
+                      "additionalProperties": false
+                    },
+                    "engineeringError": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "inner": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "default": null,

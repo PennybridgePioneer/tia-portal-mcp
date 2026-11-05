@@ -14,11 +14,22 @@ namespace TiaMcpServer.Tests.Network;
 /// </summary>
 public class NetworkSubnetLifecyclePayloadContractTests
 {
+    [Theory]
+    [InlineData("create_subnet")]
+    [InlineData("update_subnet")]
+    [InlineData("delete_subnet")]
+    public void SubnetResult_RequiresOnlyIdentityAndName(string operation)
+    {
+        var item = Project(operation, """{"subnetId":"subnet-1","name":"Ethernet"}""");
+        Assert.Equal(OperationBatchStatus.Succeeded, item.Status);
+        Assert.Equal(new[] { "name", "subnetId" }, item.Result!.Value.EnumerateObject().Select(p => p.Name).OrderBy(n => n));
+    }
+
     private const string LeakToken = "payload-leak-canary";
 
     private static StructuredOperationItem Project(string operation, string payload)
         => NetworkPayloadContract.Project(
-            new NetworkOperationRequest { OperationId = "op-1", Operation = operation },
+            new NetworkOperationRequest { OperationId = "op-1", Operation = operation, Target = new() { SubnetId = "subnet-1" } },
             WorkerCallResult.Ok(payload));
 
     /// <summary>
@@ -31,7 +42,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_DecodesValidSubnetLifecyclePayload_IntoSucceededItem(string operation)
     {
-        var validPayload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var validPayload = """{"subnetId":"subnet-1","name":"Ethernet"}""";
         var item = Project(operation, validPayload);
 
         // After registration, should succeed with JsonElement result
@@ -40,15 +51,11 @@ public class NetworkSubnetLifecyclePayloadContractTests
         Assert.NotNull(item.Result);
         Assert.Equal(JsonValueKind.Object, item.Result!.Value.ValueKind);
 
-        // Verify all four members are present in the result
+        // Verify the minimal result members.
         Assert.True(item.Result.Value.TryGetProperty("subnetId", out var subnetId));
         Assert.Equal("subnet-1", subnetId.GetString());
         Assert.True(item.Result.Value.TryGetProperty("name", out var name));
         Assert.Equal("Ethernet", name.GetString());
-        Assert.True(item.Result.Value.TryGetProperty("networkDeviceCount", out var count));
-        Assert.Equal(0, count.GetInt32());
-        Assert.True(item.Result.Value.TryGetProperty("networkDeviceCountUnchanged", out var unchanged));
-        Assert.True(unchanged.GetBoolean());
     }
 
     /// <summary>
@@ -60,7 +67,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenSubnetIdMissing(string operation)
     {
-        var payload = """{"name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"name":"Ethernet"}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -77,7 +84,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenSubnetIdNull(string operation)
     {
-        var payload = """{"subnetId":null,"name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"subnetId":null,"name":"Ethernet"}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -94,7 +101,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenSubnetIdBlank(string operation)
     {
-        var payload = """{"subnetId":"   ","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"subnetId":"   ","name":"Ethernet"}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -111,7 +118,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenNameMissing(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"subnetId":"subnet-1"}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -128,7 +135,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenNameNull(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","name":null,"networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"subnetId":"subnet-1","name":null}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -145,75 +152,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenNameBlank(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","name":"  ","networkDeviceCount":0,"networkDeviceCountUnchanged":true}""";
-        var item = Project(operation, payload);
-
-        Assert.Equal(OperationBatchStatus.Failed, item.Status);
-        Assert.NotNull(item.Failure);
-        Assert.Equal(WorkerFailureCategories.ProtocolError, item.Failure!.Category);
-    }
-
-    /// <summary>
-    /// Negative networkDeviceCount must be rejected during validation.
-    /// </summary>
-    [Theory]
-    [InlineData("create_subnet")]
-    [InlineData("update_subnet")]
-    [InlineData("delete_subnet")]
-    public void Project_RejectsPayload_WhenNetworkDeviceCountNegative(string operation)
-    {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":-1,"networkDeviceCountUnchanged":true}""";
-        var item = Project(operation, payload);
-
-        Assert.Equal(OperationBatchStatus.Failed, item.Status);
-        Assert.NotNull(item.Failure);
-        Assert.Equal(WorkerFailureCategories.ProtocolError, item.Failure!.Category);
-    }
-
-    [Theory]
-    [InlineData("create_subnet")]
-    [InlineData("update_subnet")]
-    [InlineData("delete_subnet")]
-    public void Project_RejectsPayload_WhenNetworkDeviceCountMissing(string operation)
-    {
-        var payload =
-            """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCountUnchanged":true}""";
-        var item = Project(operation, payload);
-
-        Assert.Equal(OperationBatchStatus.Failed, item.Status);
-        Assert.Null(item.Result);
-        Assert.NotNull(item.Failure);
-        Assert.Equal(WorkerFailureCategories.ProtocolError, item.Failure!.Category);
-        Assert.DoesNotContain("subnet-1", item.Failure.Message);
-    }
-
-    /// <summary>
-    /// Missing networkDeviceCountUnchanged must be rejected during validation.
-    /// </summary>
-    [Theory]
-    [InlineData("create_subnet")]
-    [InlineData("update_subnet")]
-    [InlineData("delete_subnet")]
-    public void Project_RejectsPayload_WhenNetworkDeviceCountUnchangedMissing(string operation)
-    {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0}""";
-        var item = Project(operation, payload);
-
-        Assert.Equal(OperationBatchStatus.Failed, item.Status);
-        Assert.NotNull(item.Failure);
-        Assert.Equal(WorkerFailureCategories.ProtocolError, item.Failure!.Category);
-    }
-
-    /// <summary>
-    /// False networkDeviceCountUnchanged must be rejected during validation.
-    /// </summary>
-    [Theory]
-    [InlineData("create_subnet")]
-    [InlineData("update_subnet")]
-    [InlineData("delete_subnet")]
-    public void Project_RejectsPayload_WhenNetworkDeviceCountUnchangedFalse(string operation)
-    {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":false}""";
+        var payload = """{"subnetId":"subnet-1","name":"  "}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -230,7 +169,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenExtraNetworkTypeMember(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true,"networkType":"Ethernet"}""";
+        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkType":"Ethernet"}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -249,7 +188,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenExtraHighestAddressMember(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true,"highestAddress":126}""";
+        var payload = """{"subnetId":"subnet-1","name":"Ethernet","highestAddress":126}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -266,7 +205,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_RejectsPayload_WhenExtraDevicesMember(string operation)
     {
-        var payload = """{"subnetId":"subnet-1","name":"Ethernet","networkDeviceCount":0,"networkDeviceCountUnchanged":true,"devices":[]}""";
+        var payload = """{"subnetId":"subnet-1","name":"Ethernet","devices":[]}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);
@@ -300,7 +239,7 @@ public class NetworkSubnetLifecyclePayloadContractTests
     [InlineData("delete_subnet")]
     public void Project_DoesNotEchoPayload_InFailureMessage(string operation)
     {
-        var payload = """{"subnetId":"payload-leak-canary","name":"Ethernet","networkDeviceCount":-1,"networkDeviceCountUnchanged":true}""";
+        var payload = """{"subnetId":"payload-leak-canary","name":"Ethernet","unexpected":true}""";
         var item = Project(operation, payload);
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);

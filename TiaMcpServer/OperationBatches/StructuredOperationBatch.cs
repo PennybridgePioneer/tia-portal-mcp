@@ -15,11 +15,13 @@ public static class StructuredOperationSkipReasons
 /// <summary>
 /// Why one operation failed. <paramref name="Category"/> is a WorkerFailureCategories value.
 /// <paramref name="BlockImportOutcome"/> is present only on a failed content-import item.
+/// <paramref name="EngineeringError"/> is present only when a Siemens exception caused the failure.
 /// </summary>
 public sealed record StructuredOperationFailure(
     string Category,
     string Message,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BlockImportOutcomeInfo? BlockImportOutcome = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BlockImportOutcomeInfo? BlockImportOutcome = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EngineeringErrorInfo? EngineeringError = null);
 
 /// <summary>Why one operation's result was withheld, and how to retrieve it.</summary>
 public sealed record StructuredOperationOmission(
@@ -48,7 +50,24 @@ public sealed record StructuredOperationItem(
     StructuredOperationFailure? Failure,
     StructuredOperationOmission? Omission,
     string? SkipReason,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public static StructuredOperationItem Failed(
+        IOperationBatchItem item,
+        string category,
+        string message,
+        IReadOnlyList<string> warnings,
+        BlockImportOutcomeInfo? blockImportOutcome = null)
+        => new(
+            item.OperationId,
+            item.Operation,
+            OperationBatchStatus.Failed,
+            Result: null,
+            new StructuredOperationFailure(category, message, blockImportOutcome),
+            Omission: null,
+            SkipReason: null,
+            warnings);
+}
 
 public sealed record StructuredOperationCounts(
     int Succeeded,

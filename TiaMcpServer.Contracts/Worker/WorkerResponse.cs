@@ -1,4 +1,5 @@
 using TiaMcpServer.Contracts.Hmi;
+using TiaMcpServer.Contracts.Network;
 using System.Text.Json.Serialization;
 using TiaMcpServer.Contracts.Block;
 using TiaMcpServer.Contracts.Vci;
@@ -25,6 +26,14 @@ public class WorkerResponse
     /// <see cref="ResolvedProjectPath"/>, which are patched in after the fact. Null on success.
     /// </summary>
     public string? FailureCategory { get; init; }
+
+    /// <summary>The Siemens exception behind a failure; omitted unless one caused it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineeringErrorInfo? EngineeringError { get; set; }
+
+    /// <summary>Settings applied before a configure_network_device rejection; omitted for unrelated methods.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ConfigureNetworkDeviceResultInfo? ConfigureNetworkDeviceOutcome { get; set; }
 
     /// <summary>Typed evidence for update_block_logic; omitted for unrelated methods.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

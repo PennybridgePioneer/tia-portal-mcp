@@ -37,15 +37,19 @@ public sealed class HardwarePaginationFakeWorkerTests
     [Fact]
     public async Task NetworkRead_PagedHardwareReconstructsTheStableDeviceThenSubnetSequence()
     {
-        using var client = await CreateClientAsync(Scenario);
+        using var client = await FakeWorkerClients.CreateBoundAsync(Scenario);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
 
-        var first = await ReadPage(client, pageSize: 2, projectPath: Scenario);
+        var first = await ReadPage(client, executor, pageSize: 2, projectPath: Scenario);
         var second = await ReadPage(
             client,
+            executor,
             pageSize: 1,
             cursor: first.GetProperty("pagination").GetProperty("nextCursor").GetString());
         var third = await ReadPage(
             client,
+            executor,
             pageSize: 2,
             cursor: second.GetProperty("pagination").GetProperty("nextCursor").GetString());
 
@@ -83,9 +87,11 @@ public sealed class HardwarePaginationFakeWorkerTests
     [InlineData("hardware-pagination-wrong-payload")]
     public async Task NetworkRead_InvalidCandidateResponsesFailClosedAsProtocolErrors(string scenario)
     {
-        using var client = await CreateClientAsync(scenario);
+        using var client = await FakeWorkerClients.CreateBoundAsync(scenario);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
 
-        var operation = await ReadOperation(client, pageSize: 1, projectPath: scenario);
+        var operation = await ReadOperation(client, executor, pageSize: 1, projectPath: scenario);
 
         Assert.Equal("failed", operation.GetProperty("status").GetString());
         Assert.Equal(
@@ -99,10 +105,12 @@ public sealed class HardwarePaginationFakeWorkerTests
     [Fact]
     public async Task NetworkRead_ChangedCursorBoundFilterFailsBeforeTheWorker()
     {
-        using var client = await CreateClientAsync("hardware-pagination-telemetry");
-        var first = await ReadPage(client, 1, "hardware-pagination-telemetry");
-        var operation = await ReadOperation(client, 1, cursor: Cursor(first), deviceName: "PLC_DUP");
-        var resumed = await ReadPage(client, 1, cursor: Cursor(first));
+        using var client = await FakeWorkerClients.CreateBoundAsync("hardware-pagination-telemetry");
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
+        var first = await ReadPage(client, executor, 1, "hardware-pagination-telemetry");
+        var operation = await ReadOperation(client, executor, 1, cursor: Cursor(first), deviceName: "PLC_DUP");
+        var resumed = await ReadPage(client, executor, 1, cursor: Cursor(first));
 
         Assert.Equal(WorkerFailureCategories.CursorFilterMismatch, FailureCategory(operation));
         Assert.Contains("Worker candidate requests: 2.", resumed.GetProperty("messages").EnumerateArray().Select(message => message.GetString()));
@@ -111,10 +119,12 @@ public sealed class HardwarePaginationFakeWorkerTests
     [Fact]
     public async Task NetworkRead_ChangedCursorBoundDetailFlagFailsBeforeTheWorker()
     {
-        using var client = await CreateClientAsync("hardware-pagination-telemetry");
-        var first = await ReadPage(client, 1, "hardware-pagination-telemetry");
-        var operation = await ReadOperation(client, 1, cursor: Cursor(first), includeIoDetails: true);
-        var resumed = await ReadPage(client, 1, cursor: Cursor(first));
+        using var client = await FakeWorkerClients.CreateBoundAsync("hardware-pagination-telemetry");
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
+        var first = await ReadPage(client, executor, 1, "hardware-pagination-telemetry");
+        var operation = await ReadOperation(client, executor, 1, cursor: Cursor(first), includeIoDetails: true);
+        var resumed = await ReadPage(client, executor, 1, cursor: Cursor(first));
 
         Assert.Equal(WorkerFailureCategories.CursorFilterMismatch, FailureCategory(operation));
         Assert.Contains("Worker candidate requests: 2.", resumed.GetProperty("messages").EnumerateArray().Select(message => message.GetString()));
@@ -126,9 +136,11 @@ public sealed class HardwarePaginationFakeWorkerTests
     [InlineData("hardware-pagination-identity-drift", WorkerFailureCategories.CursorBindingMismatch)]
     public async Task NetworkRead_ContinuationWorkerDriftUsesTheApprovedFailureCategory(string scenario, string category)
     {
-        using var client = await CreateClientAsync(scenario);
-        var first = await ReadPage(client, 1, scenario);
-        var operation = await ReadOperation(client, 1, cursor: Cursor(first));
+        using var client = await FakeWorkerClients.CreateBoundAsync(scenario);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
+        var first = await ReadPage(client, executor, 1, scenario);
+        var operation = await ReadOperation(client, executor, 1, cursor: Cursor(first));
 
         Assert.Equal(category, FailureCategory(operation));
     }
@@ -137,15 +149,17 @@ public sealed class HardwarePaginationFakeWorkerTests
     public async Task NetworkRead_HostBindingChangeAfterTheFirstPageFailsBeforeTheWorker()
     {
         var binding = new ProjectSessionBinding(null);
-        using var client = new OpennessWorkerClient(binding, logger: null, workerExecutablePath: FakeWorkerLocator.Locate());
+        using var client = FakeWorkerClients.Create(binding: binding);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
         await FakeWorkerBinding.BindVerifiedAsync(client, binding, Scenario);
-        var first = await ReadPage(client, 1, Scenario);
+        var first = await ReadPage(client, executor, 1, Scenario);
         // Same worker identity, new binding epoch: the read precheck passes, the cursor does not.
         var identity = binding.CaptureSnapshot().ToWorkerIdentity()!;
         Assert.True(binding.Clear(null, out var error), error);
         Assert.True(binding.BindVerified(identity, forceRebind: false, out error), error);
 
-        var operation = await ReadOperation(client, 1, cursor: Cursor(first));
+        var operation = await ReadOperation(client, executor, 1, cursor: Cursor(first));
 
         Assert.Equal(WorkerFailureCategories.CursorBindingMismatch, FailureCategory(operation));
     }
@@ -154,9 +168,11 @@ public sealed class HardwarePaginationFakeWorkerTests
     public async Task NetworkRead_CursorSignedByAnotherProcessScopedCodecIsInvalid()
     {
         string cursor;
-        using (var firstClient = await CreateClientAsync(Scenario))
+        using (var firstClient = await FakeWorkerClients.CreateBoundAsync(Scenario))
+        using (var protector = AuthenticatedCursorProtector.CreateProcessScoped())
         {
-            cursor = Cursor(await ReadPage(firstClient, 1, Scenario));
+            var executor = NetworkReadTestFactory.Create(firstClient, protector);
+            cursor = Cursor(await ReadPage(firstClient, executor, 1, Scenario));
         }
 
         using var otherProcess = new AuthenticatedCursorProtector(new byte[32], "other-process");
@@ -170,12 +186,14 @@ public sealed class HardwarePaginationFakeWorkerTests
     public async Task NetworkRead_UnpagedFixtureIsCanonicalAndPagedContinuationStaysOnTheBinding()
     {
         var binding = new ProjectSessionBinding(null);
-        using var client = new OpennessWorkerClient(binding, logger: null, workerExecutablePath: FakeWorkerLocator.Locate());
+        using var client = FakeWorkerClients.Create(binding: binding);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
         await FakeWorkerBinding.BindVerifiedAsync(client, binding, Scenario);
         var bound = binding.CaptureSnapshot();
-        var unpaged = await ReadPage(client, 50, Scenario, paged: false);
-        var first = await ReadPage(client, 1, Scenario);
-        var second = await ReadPage(client, 4, cursor: Cursor(first));
+        var unpaged = await ReadPage(client, executor, 50, Scenario, paged: false);
+        var first = await ReadPage(client, executor, 1, Scenario);
+        var second = await ReadPage(client, executor, 4, cursor: Cursor(first));
 
         Assert.True(bound.SameBinding(client.BindingSnapshot));
         Assert.Equal(ProjectBindingSnapshot.VerifiedState, client.BindingSnapshot.State);
@@ -194,9 +212,11 @@ public sealed class HardwarePaginationFakeWorkerTests
     [Fact]
     public async Task NetworkRead_CanonicalItemTrimmingResumesWithTheUnemittedCandidatesAndDiagnostics()
     {
-        using var client = await CreateClientAsync(TrimmingScenarioProjectPath);
-        var first = await ReadPage(client, 6, TrimmingScenarioProjectPath);
-        var second = await ReadPage(client, 6, cursor: Cursor(first));
+        using var client = await FakeWorkerClients.CreateBoundAsync(TrimmingScenarioProjectPath);
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client, protector);
+        var first = await ReadPage(client, executor, 6, TrimmingScenarioProjectPath);
+        var second = await ReadPage(client, executor, 6, cursor: Cursor(first));
 
         var firstReturned = first.GetProperty("pagination").GetProperty("returnedDevices").GetInt32()
             + first.GetProperty("pagination").GetProperty("returnedSubnets").GetInt32();
@@ -211,16 +231,9 @@ public sealed class HardwarePaginationFakeWorkerTests
                 + second.GetProperty("devices").GetArrayLength() + second.GetProperty("subnets").GetArrayLength());
     }
 
-    private static async Task<OpennessWorkerClient> CreateClientAsync(string projectPath)
-    {
-        var binding = new ProjectSessionBinding(null);
-        var client = new OpennessWorkerClient(binding, logger: null, workerExecutablePath: FakeWorkerLocator.Locate());
-        await FakeWorkerBinding.BindVerifiedAsync(client, binding, projectPath);
-        return client;
-    }
-
     private static async Task<JsonElement> ReadPage(
         OpennessWorkerClient client,
+        NetworkReadOperationExecutor executor,
         int pageSize,
         string? projectPath = null,
         string? cursor = null,
@@ -228,7 +241,7 @@ public sealed class HardwarePaginationFakeWorkerTests
         bool? includeIoDetails = null,
         bool paged = true)
     {
-        var operation = await ReadOperation(client, pageSize, projectPath, cursor, deviceName, includeIoDetails, paged);
+        var operation = await ReadOperation(client, executor, pageSize, projectPath, cursor, deviceName, includeIoDetails, paged);
         Assert.True(
             string.Equals("succeeded", operation.GetProperty("status").GetString(), StringComparison.Ordinal),
             operation.GetRawText());
@@ -237,6 +250,7 @@ public sealed class HardwarePaginationFakeWorkerTests
 
     private static async Task<JsonElement> ReadOperation(
         OpennessWorkerClient client,
+        NetworkReadOperationExecutor executor,
         int pageSize,
         string? projectPath = null,
         string? cursor = null,
@@ -248,6 +262,7 @@ public sealed class HardwarePaginationFakeWorkerTests
             ? null : FakeWorkerUiOpenProject.ForWorkerRelativePath(projectPath);
         var result = await NetworkReadTools.NetworkRead(
             client,
+            executor,
             new[]
             {
                 new NetworkOperationRequest

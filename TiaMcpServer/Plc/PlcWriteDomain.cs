@@ -2,7 +2,6 @@ using TiaMcpServer.OperationBatches;
 using TiaMcpServer.Safety.Pipeline;
 using TiaMcpServer.Worker;
 using TiaMcpServer.Contracts.Safety;
-using TiaMcpServer.Contracts.Worker;
 
 namespace TiaMcpServer.Plc;
 
@@ -22,20 +21,16 @@ public sealed class PlcWriteDomain(OpennessWorkerClient client)
 
     public string ToolName => "plc_write";
 
-    public string ContractVersion => PlcContractVersion.Current;
+    public string ContractVersion => PlcWriteContractVersion.Current;
 
     public bool ConfirmsEveryCall => false;
 
     public WriteValidation Validate(IReadOnlyList<PlcOperationRequest> items, McpAccessMode accessMode)
-    {
-        var validation = PlcOperationCatalog.ValidateWrite(items);
-        if (!validation.IsValid) return WriteValidation.Invalid(validation.Category, validation.Error);
-        if (PlcWritePayloadBudget.MeasureProtectedCore(items) > StructuredOperationBatchPayloadBudget.MaxDocumentChars)
-            return WriteValidation.Invalid(WorkerFailureCategories.ValidationError,
-                "The encoded operation identities leave insufficient room for the required response summaries. Use smaller plc_write calls.");
-        var errors = PlcOperationCatalog.ValidateAccessMode(items, accessMode);
-        return errors.Count == 0 ? WriteValidation.Valid() : WriteValidation.Invalid(WorkerFailureCategories.AccessDenied, string.Join("\n", errors));
-    }
+        => WriteValidation.Compose(
+            PlcOperationCatalog.ValidateWrite(items),
+            () => PlcWritePayloadBudget.MeasureProtectedCore(items),
+            () => PlcOperationCatalog.ValidateAccessMode(items, accessMode),
+            ToolName);
 
     public async Task<WritePlan<PlcWriteEffect>> PlanAsync(IReadOnlyList<PlcOperationRequest> items)
     {
@@ -76,7 +71,7 @@ public sealed class PlcWriteDomain(OpennessWorkerClient client)
         => PlcPayloadContract.ProjectWrite(item, result);
 
     public async Task<PlcWriteVerification?> VerifyAsync(StructuredOperationBatch batch)
-        => await new PlcWriteVerifier(client, _items, _effects).VerifyAsync(
+        => await PlcVerificationPolicy.VerifyAsync(client, _items, _effects,
             StructuredOperationBatch.FromItems(batch.Operations.Where(o => _attempted.Contains(o.OperationId)).ToArray())).ConfigureAwait(false);
 
     public bool VerificationSucceeded(PlcWriteVerification? verification) => verification?.Success == true;

@@ -1,21 +1,23 @@
 namespace TiaMcpServer.Tests.TestSupport;
 
 /// <summary>
-/// Records only child-worker method names. Use only in RealWorkerProcessCollection or
-/// Mcp protocol serial, with the consumer's worker access mode stated explicitly.
+/// Records only child-worker method names. The environment variable is process-wide, so use only
+/// in a serial collection such as RealWorkerProcessCollection or Mcp protocol serial
+/// (ProcessEnvironmentIsolationTests enforces this), with the consumer's worker access mode stated
+/// explicitly.
 /// </summary>
 internal sealed class FakeWorkerRequestLog : IDisposable
 {
     private const string Variable = "TIA_MCP_FAKE_WORKER_REQUEST_LOG";
     private readonly string? _previous = Environment.GetEnvironmentVariable(Variable);
-    private readonly string _path;
-
     public FakeWorkerRequestLog(string directory)
     {
-        _path = Path.Combine(directory, "requests-" + Guid.NewGuid().ToString("N") + ".log");
-        Environment.SetEnvironmentVariable(Variable, _path);
+        Path = System.IO.Path.Combine(directory, "requests-" + Guid.NewGuid().ToString("N") + ".log");
+        Environment.SetEnvironmentVariable(Variable, Path);
     }
 
-    public string[] Methods() => File.Exists(_path) ? File.ReadAllLines(_path) : Array.Empty<string>();
+    public string Path { get; }
+
+    public string[] Methods() => File.Exists(Path) ? File.ReadAllLines(Path) : Array.Empty<string>();
     public void Dispose() => Environment.SetEnvironmentVariable(Variable, _previous);
 }

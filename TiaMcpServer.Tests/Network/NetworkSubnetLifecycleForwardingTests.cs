@@ -24,25 +24,6 @@ public class NetworkSubnetLifecycleForwardingTests
 {
     private static readonly string EchoProjectPath = ProjectPathNormalization.Canonicalize("echo")!;
 
-    private static async Task<OpennessWorkerClient> CreateClientAsync()
-    {
-        var binding = new ProjectSessionBinding(null);
-        var client = new OpennessWorkerClient(
-            binding,
-            logger: null,
-            workerExecutablePath: FakeWorkerLocator.Locate());
-        try
-        {
-            await FakeWorkerBinding.BindVerifiedAsync(client, binding, EchoProjectPath);
-            return client;
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
-    }
-
     #region Step 1: Access classification
 
     [Theory]
@@ -150,7 +131,7 @@ public class NetworkSubnetLifecycleForwardingTests
             },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -168,7 +149,7 @@ public class NetworkSubnetLifecycleForwardingTests
             SubnetChanges = new NetworkSubnetChanges { Name = "Renamed" },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -185,7 +166,7 @@ public class NetworkSubnetLifecycleForwardingTests
             Target = new NetworkObjectTarget { SubnetId = "subnet-7" },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -212,7 +193,7 @@ public class NetworkSubnetLifecycleForwardingTests
             },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -225,12 +206,10 @@ public class NetworkSubnetLifecycleForwardingTests
         Assert.Equal(SubnetLifecycleContract.Profibus, root.GetProperty("subnetNetworkType").GetString());
         Assert.Equal(31, root.GetProperty("subnetHighestAddress").GetInt32());
         Assert.Equal("Baud1500000", root.GetProperty("subnetTransmissionSpeed").GetString());
-        Assert.True(root.GetProperty("confirm").GetBoolean());
 
         // create_subnet never forwards a target id — a new subnet's id is assigned by Openness.
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetId").ValueKind);
 
-        AssertNoProbeFieldsPopulated(root);
     }
 
     [Fact]
@@ -244,7 +223,7 @@ public class NetworkSubnetLifecycleForwardingTests
             SubnetChanges = new NetworkSubnetChanges { Name = "Renamed" },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -255,7 +234,6 @@ public class NetworkSubnetLifecycleForwardingTests
         Assert.Equal(EchoProjectPath, root.GetProperty("projectPath").GetString());
         Assert.Equal("subnet-42", root.GetProperty("subnetId").GetString());
         Assert.Equal("Renamed", root.GetProperty("subnetName").GetString());
-        Assert.True(root.GetProperty("confirm").GetBoolean());
 
         // Only 'name' was requested; the other two change fields and the (not-updatable) network
         // type must stay unset.
@@ -263,7 +241,6 @@ public class NetworkSubnetLifecycleForwardingTests
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetTransmissionSpeed").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetNetworkType").ValueKind);
 
-        AssertNoProbeFieldsPopulated(root);
     }
 
     [Fact]
@@ -282,7 +259,7 @@ public class NetworkSubnetLifecycleForwardingTests
             },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -295,7 +272,6 @@ public class NetworkSubnetLifecycleForwardingTests
         Assert.Equal("Baud93750", root.GetProperty("subnetTransmissionSpeed").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetNetworkType").ValueKind);
 
-        AssertNoProbeFieldsPopulated(root);
     }
 
     [Fact]
@@ -308,7 +284,7 @@ public class NetworkSubnetLifecycleForwardingTests
             Target = new NetworkObjectTarget { SubnetId = "subnet-7" },
         };
 
-        using var client = await CreateClientAsync();
+        using var client = await FakeWorkerClients.CreateBoundAsync(EchoProjectPath);
         var result = await NetworkWorkerInvoker.InvokeWriteAsync(client, operation);
 
         Assert.True(result.Success, result.Error);
@@ -318,28 +294,12 @@ public class NetworkSubnetLifecycleForwardingTests
         Assert.Equal("delete_subnet", root.GetProperty("method").GetString());
         Assert.Equal(EchoProjectPath, root.GetProperty("projectPath").GetString());
         Assert.Equal("subnet-7", root.GetProperty("subnetId").GetString());
-        Assert.True(root.GetProperty("confirm").GetBoolean());
 
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetName").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetNetworkType").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetHighestAddress").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("subnetTransmissionSpeed").ValueKind);
 
-        AssertNoProbeFieldsPopulated(root);
-    }
-
-    /// <summary>
-    /// Every production-call assertion in this file also proves the flip side of the brief's
-    /// constraint: none of the three new worker-client methods ever populates a <c>Probe*</c>
-    /// member — those stay reserved for <c>probe_subnet_lifecycle_mutations</c> alone.
-    /// </summary>
-    private static void AssertNoProbeFieldsPopulated(JsonElement root)
-    {
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("probeRunId").ValueKind);
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("probeConnectedEthernetSubnetId").ValueKind);
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("probeConnectedProfibusSubnetId").ValueKind);
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("probeProfibusHighestAddress").ValueKind);
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("probeProfibusTransmissionSpeed").ValueKind);
     }
 
     #endregion

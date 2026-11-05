@@ -1,7 +1,6 @@
 using TiaMcpServer.Contracts.Hmi;
 using TiaMcpServer.Contracts.Project;
 using TiaMcpServer.Contracts.Safety;
-using TiaMcpServer.Contracts.Worker;
 using TiaMcpServer.Hmi;
 using TiaMcpServer.Json;
 using TiaMcpServer.Worker;
@@ -79,6 +78,14 @@ public class HmiGuardedWriteDomainTests
         Assert.False(domain.ConfirmsEveryCall);
         Assert.Equal("access_denied", domain.Validate([Item()], McpAccessMode.ReadOnly).Error!.Category);
         Assert.False(domain.VerificationSucceeded(null));
+    }
+
+    [Fact]
+    public async Task ReplanAsync_Throws()
+    {
+        using var client = new OpennessWorkerClient(new ProjectSessionBinding(null));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new HmiWriteDomain(client).ReplanAsync(Item()));
+        Assert.Equal("hmi_write plans declare no dependencies; ReplanAsync must never be called.", error.Message);
     }
 
     internal static HmiWriteOperationRequest Item(string id = "a") => new() { OperationId = id, Operation = "create_tag_table", TableName = "T" };

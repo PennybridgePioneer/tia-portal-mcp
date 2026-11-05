@@ -114,7 +114,7 @@ public class StructuredOperationBatchPayloadBudgetTests
         var bounded = NetworkReadTools.ApplyBudget(projectedPages);
 
         var networkDocumentChars = CanonicalJson.Serialize(
-            new NetworkReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
+            new OperationBatchReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
                 Error: null, Warnings: Array.Empty<string>(), Batch: bounded)).Length;
         Assert.True(networkDocumentChars <= StructuredOperationBatchPayloadBudget.MaxDocumentChars);
         Assert.True(bounded.Counts.Omitted > 0);
@@ -149,7 +149,7 @@ public class StructuredOperationBatchPayloadBudgetTests
         Assert.Equal(HardwarePageProjector.RetryGuidance, item.Omission.Guidance);
         Assert.True(
             CanonicalJson.Serialize(
-                new NetworkReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
+                new OperationBatchReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
                     Error: null, Warnings: Array.Empty<string>(), Batch: bounded)).Length
                 <= DocumentLimit);
     }
@@ -458,7 +458,7 @@ public class StructuredOperationBatchPayloadBudgetTests
         Assert.Contains("fewer attributeNames", item.Omission.Guidance, StringComparison.Ordinal);
 
         var toolResult = StructuredToolResult.Create(
-            new NetworkReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
+            new OperationBatchReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
                 Error: null, Warnings: Array.Empty<string>(), Batch: bounded),
             isError: false);
         var text = Assert.IsType<TextContentBlock>(Assert.Single(toolResult.Content)).Text;
@@ -476,7 +476,7 @@ public class StructuredOperationBatchPayloadBudgetTests
 
         var bounded = NetworkReadTools.ApplyBudget(batch);
         var presented = CanonicalJson.Serialize(
-            new NetworkReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
+            new OperationBatchReadResponse("network_read", NetworkContractVersion.Current, bounded.IsFullySuccessful,
                 Error: null, Warnings: Array.Empty<string>(), Batch: bounded));
 
         Assert.Equal(180_000, StructuredOperationBatchPayloadBudget.MaxDocumentChars);
@@ -502,7 +502,7 @@ public class StructuredOperationBatchPayloadBudgetTests
 
         static int Chars(StructuredOperationBatch value)
             => CanonicalJson.Serialize(
-                new NetworkReadResponse("network_read", NetworkContractVersion.Current, value.IsFullySuccessful,
+                new OperationBatchReadResponse("network_read", NetworkContractVersion.Current, value.IsFullySuccessful,
                     Error: null, Warnings: Array.Empty<string>(), Batch: value)).Length;
 
         var sizes = Enumerable.Repeat(Probe, Count).ToArray();
@@ -552,9 +552,9 @@ public class StructuredOperationBatchPayloadBudgetTests
     public void NetworkWriteBudget_MinimalSubnetLifecycleResultSurvivesNormalLimits(string operation)
     {
         var validPayload =
-            """{"subnetId":"subnet-1","name":"PN/IE_1","networkDeviceCount":2,"networkDeviceCountUnchanged":true}""";
+            """{"subnetId":"subnet-1","name":"PN/IE_1"}""";
         var item = NetworkPayloadContract.Project(
-            new NetworkOperationRequest { OperationId = "op-1", Operation = operation },
+            new NetworkOperationRequest { OperationId = "op-1", Operation = operation, Target = new() { SubnetId = "subnet-1" } },
             WorkerCallResult.Ok(validPayload));
         Assert.Equal(OperationBatchStatus.Succeeded, item.Status);
 
@@ -589,10 +589,10 @@ public class StructuredOperationBatchPayloadBudgetTests
         // it must never even see a "value" - the contract fails the item first.
         var oversizedUnexpectedMember = new string('x', StructuredOperationBatchPayloadBudget.MaxItemChars + 1);
         var malformedPayload =
-            $$"""{"subnetId":"subnet-1","name":"PN/IE_1","networkDeviceCount":2,"networkDeviceCountUnchanged":true,"relationshipSummary":"{{oversizedUnexpectedMember}}"}""";
+            $$"""{"subnetId":"subnet-1","name":"PN/IE_1","relationshipSummary":"{{oversizedUnexpectedMember}}"}""";
 
         var item = NetworkPayloadContract.Project(
-            new NetworkOperationRequest { OperationId = "op-1", Operation = operation },
+            new NetworkOperationRequest { OperationId = "op-1", Operation = operation, Target = new() { SubnetId = "subnet-1" } },
             WorkerCallResult.Ok(malformedPayload));
 
         Assert.Equal(OperationBatchStatus.Failed, item.Status);

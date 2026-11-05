@@ -27,15 +27,18 @@ public static class VciWritePayloadContract
             var outcome = result.Success ? CanonicalJson.DeserializeWorkerPayload<VciWriteOutcomeInfo>(result.Payload) : result.VciWriteOutcome;
             if (outcome is not null) Validate(outcome);
             var failed = !result.Success || outcome!.Failed > 0;
+            if (outcome is null)
+                return StructuredOperationItem.Failed(item, result.FailureCategory ?? WorkerFailureCategories.WorkerOperationFailed,
+                    result.Error ?? "One or more VCI leaves failed.", result.Warnings);
             return new(item.OperationId, item.Operation, failed ? OperationBatchStatus.Failed : OperationBatchStatus.Succeeded,
-                outcome is null ? null : CanonicalJson.ToElement(outcome),
+                CanonicalJson.ToElement(outcome),
                 failed ? new(result.FailureCategory ?? WorkerFailureCategories.WorkerOperationFailed, result.Error ?? "One or more VCI leaves failed.") : null,
                 null, null, result.Warnings);
         }
         catch (JsonException)
         {
-            return new(item.OperationId, item.Operation, OperationBatchStatus.Failed, null,
-                new(WorkerFailureCategories.ProtocolError, "The VCI worker outcome did not match its declared result contract and was rejected."), null, null, result.Warnings);
+            return StructuredOperationItem.Failed(item, WorkerFailureCategories.ProtocolError,
+                "The VCI worker outcome did not match its declared result contract and was rejected.", result.Warnings);
         }
     }
 
@@ -48,5 +51,17 @@ public static class VciWritePayloadContract
         if (outcome.LastAttempted is { } last && (last.Path is null || last.Path.Count == 0
             || last.Path.Any(p => p is null || string.IsNullOrWhiteSpace(p.NodeType) || string.IsNullOrWhiteSpace(p.Name))
             || string.IsNullOrWhiteSpace(last.Operation))) throw new JsonException();
+        if (outcome.Failures is not { } failures || failures.Count > VciWriteOutcomeInfo.MaxFailures || failures.Any(f => !IsValid(f))
+            || outcome.FailuresOmitted < 0 || failures.Count + outcome.FailuresOmitted > outcome.Failed)
+            throw new JsonException();
     }
+
+    private static bool IsValid(VciLeafFailureInfo? f)
+        => f is { Path: { Count: > 0 } path, Message: { } message }
+           && path.All(p => p is not null && !string.IsNullOrWhiteSpace(p.NodeType) && !string.IsNullOrWhiteSpace(p.Name))
+           && (f.Format is null || !string.IsNullOrWhiteSpace(f.Format))
+           && (f.EngineeringErrorType is null || !string.IsNullOrWhiteSpace(f.EngineeringErrorType))
+           && (f.Category == WorkerFailureCategories.EngineeringRejected && f.EngineeringErrorType is not null
+               || f.Category == WorkerFailureCategories.WorkerOperationFailed)
+           && message.Length <= VciLeafFailureInfo.MaxMessageChars;
 }

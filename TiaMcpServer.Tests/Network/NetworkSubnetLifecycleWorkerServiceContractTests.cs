@@ -1,3 +1,4 @@
+using TiaMcpServer.Tests.TestSupport;
 namespace TiaMcpServer.Tests.Network;
 
 using System.Linq;
@@ -13,32 +14,45 @@ using Xunit;
 /// </summary>
 public class NetworkSubnetLifecycleWorkerServiceContractTests
 {
-    private static string ServiceSource => File.ReadAllText(
-        FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Network", "SubnetLifecycleService.cs"));
+    [Fact]
+    public void Update_ResolvesTheSubnetOnceInsideItsTransaction()
+    {
+        var source = ServiceSource;
+        var body = source[source.IndexOf("public static SubnetLifecycleResultInfo Update(", StringComparison.Ordinal)..source.IndexOf("public static SubnetLifecycleResultInfo Delete(", StringComparison.Ordinal)];
+        const string resolve = "ResolveExactSubnetOrThrow(project, subnetId, \"update_subnet\")";
+        Assert.Equal(1, RepositoryFiles.CountOccurrences(body, resolve));
+        Assert.True(body.IndexOf(resolve, StringComparison.Ordinal) > body.IndexOf("exclusiveAccess.Transaction(project, \"update_subnet\")", StringComparison.Ordinal));
+    }
 
     [Fact]
-    public void Service_IsADistinctFileFromTheMutationProbe()
+    public void Lifecycle_HasNoDeviceCountOrAffectedNodeCapture()
     {
-        var path = FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Network", "SubnetLifecycleService.cs");
-        Assert.True(File.Exists(path), $"Expected a distinct production service file at {path}.");
-
-        var source = ServiceSource;
-        Assert.DoesNotContain("SubnetLifecycleMutationProbeService.Run", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("class SubnetLifecycleMutationProbeService", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("project.Devices.Count", ServiceSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureAffectedNodes", ServiceSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("NetworkMutationVerifier", ServiceSource, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Update_DoesNotRejectProfibusAttributesByType()
+    {
+        var source = ServiceSource;
+        var body = source[source.IndexOf("public static SubnetLifecycleResultInfo Update(", StringComparison.Ordinal)..source.IndexOf("public static SubnetLifecycleResultInfo Delete(", StringComparison.Ordinal)];
+        Assert.DoesNotContain("ProfibusTypeIdentifier, StringComparison.Ordinal))", body, StringComparison.Ordinal);
+    }
+
+    private static string ServiceSource => File.ReadAllText(
+        RepositoryFiles.Path("TiaMcpServer.OpennessWorker", "Openness", "Network", "SubnetLifecycleService.cs"));
 
     [Fact]
     public void Service_MapsOnlyTheTwoApprovedTypeIdentifiers()
     {
         var source = ServiceSource;
-        Assert.Contains(
-            "private const string EthernetTypeIdentifier = \"System:Subnet.Ethernet\";",
-            source,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "private const string ProfibusTypeIdentifier = \"System:Subnet.Profibus\";",
-            source,
-            StringComparison.Ordinal);
+        Assert.Contains("SubnetLifecycleContract.TypeIdentifierFor(networkType)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("private const string EthernetTypeIdentifier", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("private const string ProfibusTypeIdentifier", source, StringComparison.Ordinal);
+        Assert.Contains("WorkerFailureCategories.ValidationError", source, StringComparison.Ordinal);
+        Assert.Contains("NetworkType '{networkType}' is not supported. Valid values: ", source, StringComparison.Ordinal);
+        Assert.Contains("{SubnetLifecycleContract.Ethernet}, {SubnetLifecycleContract.Profibus}.", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,27 +100,24 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
     public void Service_UsesOneExclusiveAccessTransactionPerOperationWithCommitOnDisposeAfterEverySetter()
     {
         var source = ServiceSource;
-        Assert.Equal(3, CountOccurrences(source, "tiaPortal.ExclusiveAccess("));
-        Assert.Equal(3, CountOccurrences(source, "exclusiveAccess.Transaction(project,"));
-        Assert.Equal(3, CountOccurrences(source, "transaction.CommitOnDispose();"));
+        Assert.Equal(3, RepositoryFiles.CountOccurrences(source, "tiaPortal.ExclusiveAccess("));
+        Assert.Equal(3, RepositoryFiles.CountOccurrences(source, "exclusiveAccess.Transaction(project,"));
+        Assert.Equal(3, RepositoryFiles.CountOccurrences(source, "transaction.CommitOnDispose();"));
     }
 
     [Fact]
-    public void Service_DeleteResolvesValidatesAndCapturesNameInsideTransactionBeforeDelete()
+    public void Service_DeleteResolvesAndCapturesNameInsideTransactionBeforeDelete()
     {
         var deleteBody = ExtractPublicMethodBody(ServiceSource, "Delete");
 
         Assert.DoesNotContain("var existing =", deleteBody, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(deleteBody, "ResolveExactSubnetOrThrow("));
+        Assert.Equal(1, RepositoryFiles.CountOccurrences(deleteBody, "ResolveExactSubnetOrThrow("));
 
         var transactionIndex = deleteBody.IndexOf(
             "exclusiveAccess.Transaction(project, \"delete_subnet\")",
             StringComparison.Ordinal);
         var resolveIndex = deleteBody.IndexOf(
             "ResolveExactSubnetOrThrow(project, subnetId, \"delete_subnet\")",
-            StringComparison.Ordinal);
-        var typeIndex = deleteBody.IndexOf(
-            "ResolveCurrentTypeIdentifierOrThrow(subnet, subnetId)",
             StringComparison.Ordinal);
         var nameIndex = deleteBody.IndexOf(
             "ReadRequiredSubnetNameOrThrow(subnet, subnetId)",
@@ -116,8 +127,7 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
 
         Assert.True(transactionIndex >= 0);
         Assert.True(transactionIndex < resolveIndex);
-        Assert.True(resolveIndex < typeIndex);
-        Assert.True(typeIndex < nameIndex);
+        Assert.True(resolveIndex < nameIndex);
         Assert.True(nameIndex < deleteIndex);
         Assert.True(deleteIndex < commitIndex);
     }
@@ -138,6 +148,7 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
 
         var updateBody = ExtractPublicMethodBody(source, "Update");
         AssertOccursBeforeCommit(updateBody, "ApplyProfibusAttributes(");
+        AssertOccursBeforeCommit(updateBody, "ReadRequiredSubnetNameOrThrow(");
 
         var deleteBody = ExtractPublicMethodBody(source, "Delete");
         AssertOccursBeforeCommit(deleteBody, "subnet.Delete();");
@@ -173,75 +184,6 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
         Assert.DoesNotContain("Siemens.Engineering.HW.TransmissionSpeed", source, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Service_CapturesRootDeviceCountBeforeAndComparesAfterEveryOperation()
-    {
-        var source = ServiceSource;
-
-        // Brief Step 4, bullet 1 mandates this exact "before" capture verbatim — kept as a literal
-        // string match. The "after" re-read has no brief-mandated variable name, so it is asserted
-        // as a pattern (re-reads Devices.Count and compares it to whatever the "before" value was
-        // named) rather than pinned to the accidental identifier "deviceCountAfter".
-        Assert.Equal(3, CountOccurrences(source, "deviceCountBefore = project.Devices.Count;"));
-
-        foreach (var body in new[]
-                 {
-                     ExtractPublicMethodBody(source, "Create"),
-                     ExtractPublicMethodBody(source, "Update"),
-                     ExtractPublicMethodBody(source, "Delete"),
-                 })
-        {
-            // "before" capture, then a second, later read of project.Devices.Count for comparison.
-            Assert.Equal(1, CountOccurrences(body, "project.Devices.Count"));
-            Assert.Contains("NetworkMutationVerifier.VerifySubnet(", body);
-            Assert.Contains("result, deviceCountBefore,", body);
-        }
-        var verifier = File.ReadAllText(FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Network", "NetworkMutationVerifier.cs"));
-        Assert.Contains("result.NetworkDeviceCount = project.Devices.Count;", verifier);
-        Assert.Contains("\"networkDeviceCountUnchanged\", Number(rootCountBefore)", verifier);
-    }
-
-    [Fact]
-    public void Service_RetainsTypedImmediateVerificationAfterCommitForEveryOperation()
-    {
-        var source = ServiceSource;
-
-        // At least one postcondition-failure throw site per operation (Create legitimately may
-        // check more than one condition, but each of the three public methods must guard its own
-        // postcondition before returning).
-        var createBody = ExtractPublicMethodBody(source, "Create");
-        var updateBody = ExtractPublicMethodBody(source, "Update");
-        var deleteBody = ExtractPublicMethodBody(source, "Delete");
-        foreach (var body in new[] { createBody, updateBody, deleteBody })
-        {
-            var committed = body.IndexOf("transaction.CommitOnDispose();", StringComparison.Ordinal);
-            var verified = body.IndexOf("result.Verification = NetworkMutationVerifier.VerifySubnet(", StringComparison.Ordinal);
-            Assert.True(committed >= 0 && verified > committed);
-            Assert.Contains("return result;", body, StringComparison.Ordinal);
-        }
-
-        Assert.Contains(
-            "WorkerFailureCategories.PostconditionFailed",
-            source,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Deletion_CapturesReliableInventoryBeforeMutation_AndVerifiesAllScopes()
-    {
-        var body = ExtractPublicMethodBody(ServiceSource, "Delete");
-        Assert.True(body.IndexOf("NetworkMutationVerifier.CaptureAffectedNodes(subnet)", StringComparison.Ordinal)
-            < body.IndexOf("subnet.Delete();", StringComparison.Ordinal));
-        var verifier = File.ReadAllText(FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Network", "NetworkMutationVerifier.cs"));
-        Assert.Contains("if (!evidence.Complete)", verifier);
-        Assert.Contains("ProjectDeviceNameMatcher.FindMatches(project, name", verifier);
-        Assert.Contains("HardwareConfigReader.ReadConnectedNodeIdentity", verifier);
-        Assert.Contains("ResolveNode(project, identity)", verifier);
-        Assert.Contains("identity.InterfacePath", verifier);
-        Assert.Contains("NetworkObjectSelectorResolver.ResolveNode(project", verifier);
-        Assert.Contains("HardwareConfigReader.RequireSubnetIdentity(candidate)", verifier);
-    }
-
     private static string ExtractPublicMethodBody(string source, string methodName)
     {
         var marker = $"public static SubnetLifecycleResultInfo {methodName}(";
@@ -272,25 +214,8 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
         Assert.DoesNotContain("MessageBox", source, StringComparison.Ordinal);
 
         // subnet.Delete() is the only Delete() call — a device is never deleted.
-        Assert.Equal(1, CountOccurrences(source, ".Delete()"));
+        Assert.Equal(1, RepositoryFiles.CountOccurrences(source, ".Delete()"));
         Assert.Contains("subnet.Delete();", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Service_DeletePostconditionFailsClosedRatherThanTreatingAnUnreadableSubnetIdAsDeleted()
-    {
-        // Every other postcondition in this service already fails closed on an unreadable identity
-        // because "no match found" is a FAILURE condition there (Create/Update need exactly one
-        // match). delete_subnet is the one operation where "no match found" is the SUCCESS
-        // condition, so an unreadable-but-still-present subnet must not be silently treated as
-        // "gone" — this guards that specific asymmetry.
-        var deleteBody = ExtractPublicMethodBody(ServiceSource, "Delete");
-
-        Assert.Contains("NetworkMutationVerifier.VerifySubnet(", deleteBody);
-        var verifier = File.ReadAllText(FindRepositoryFile("TiaMcpServer.OpennessWorker", "Openness", "Network", "NetworkMutationVerifier.cs"));
-        Assert.Contains("HardwareConfigReader.RequireSubnetIdentity(candidate)", verifier);
-        Assert.Contains("if (deleting) return Boolean(matches.Count == 0);", verifier);
-        Assert.Contains("NetworkPostconditionChecks.Compare(name, expected, null, false)", verifier);
     }
 
     [Fact]
@@ -310,13 +235,12 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
     }
 
     [Fact]
-    public void Service_UsesReliableVerifierInventoryBeforeDeletingASubnet()
+    public void Service_DoesNotTraverseConnectionsBeforeDeletingASubnet()
     {
         var source = ServiceSource;
         Assert.DoesNotContain(".Nodes", source, StringComparison.Ordinal);
         Assert.DoesNotContain(".IoSystems", source, StringComparison.Ordinal);
         Assert.DoesNotContain("ConnectedNodeNames", source, StringComparison.Ordinal);
-        Assert.Contains("NetworkMutationVerifier.CaptureAffectedNodes(subnet)", source);
     }
 
     [Fact]
@@ -353,46 +277,5 @@ public class NetworkSubnetLifecycleWorkerServiceContractTests
             .ToArray();
         Assert.NotEmpty(caughtTypes);
         Assert.All(caughtTypes, caughtType => Assert.Equal("EngineeringException", caughtType));
-    }
-
-    [Fact]
-    public void Service_RejectsInapplicableProfibusOnlyChangesOnUpdateBeforeAnyTransaction()
-    {
-        var source = ServiceSource;
-        var updateStart = source.IndexOf("public static SubnetLifecycleResultInfo Update(", StringComparison.Ordinal);
-        var deleteStart = source.IndexOf("public static SubnetLifecycleResultInfo Delete(", StringComparison.Ordinal);
-        Assert.True(updateStart >= 0 && deleteStart > updateStart);
-        var updateBody = source[updateStart..deleteStart];
-
-        var firstTransactionIndex = updateBody.IndexOf("tiaPortal.ExclusiveAccess(", StringComparison.Ordinal);
-        var validationIndex = updateBody.IndexOf("WorkerFailureCategories.ValidationError", StringComparison.Ordinal);
-        Assert.True(validationIndex >= 0 && firstTransactionIndex > validationIndex);
-        Assert.Contains("ProfibusTypeIdentifier", updateBody, StringComparison.Ordinal);
-    }
-
-    private static int CountOccurrences(string source, string value)
-    {
-        var count = 0;
-        var startIndex = 0;
-        while ((startIndex = source.IndexOf(value, startIndex, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            startIndex += value.Length;
-        }
-
-        return count;
-    }
-
-    private static string FindRepositoryFile(params string[] segments)
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "TiaMcpServer.slnx")))
-            {
-                return Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
-            }
-        }
-
-        throw new InvalidOperationException("Could not locate the repository root.");
     }
 }

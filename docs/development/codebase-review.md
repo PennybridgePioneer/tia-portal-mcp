@@ -9,9 +9,9 @@ approved, under the repository [agent instructions](../../AGENTS.md). Never writ
 or private project paths into findings or tracked files.
 
 The last full review is the
-[2026-10-17 simplification review plan](../superpowers/plans/2026-10-17-codebase-simplification-review.md)
+[2026-10-17 simplification review plan](../adr/records/2026-10-17-codebase-simplification-review.md)
 (baseline `main` @ `f0c79f8`), with its
-[verified findings appendix](../superpowers/plans/2026-10-17-codebase-simplification-review-findings.md).
+[verified findings appendix](../adr/records/2026-10-17-codebase-simplification-review-findings.md).
 
 ## Why not split by project or only by area
 
@@ -81,8 +81,8 @@ Reserve full passes for milestones, such as before a major release.
 ### 5. Keep a findings ledger
 
 Findings keep stable IDs and a status: open, fixed, or won't-fix with a reason. Give reviewers the
-won't-fix and accepted items, so they do not report them again. The worker-only probes (Q1) are
-accepted for now.
+won't-fix and accepted items, so they do not report them again. Q1's three worker-only Network
+qualification probes are retired; their historical acceptance evidence is preserved.
 
 ### 6. Run the pipeline in this order
 
@@ -95,8 +95,9 @@ accepted for now.
    string dispatch, JSON serialization, tests, FakeWorker and git-ignored harness scripts, and
    checks deliberate decisions in AGENTS.md and `docs/`.
 4. **Decide.** Bring design questions to the maintainer before writing proposals for them.
-5. **Plan.** Write the plan under `docs/superpowers/plans/`, list it in the
-   [documentation index](../README.md), and update the rule list and the ledger.
+5. **Plan.** Write a transient plan under `docs/superpowers/plans/` (not listed in the index),
+   record durable decisions as an ADR, open findings in `docs/IMPROVEMENT_LOG.md` and mechanical
+   rules as tests.
 
 Each run fits within 8 concurrent agents: one or two reviewers per slice, one sweeper, and one
 verifier per reviewer.

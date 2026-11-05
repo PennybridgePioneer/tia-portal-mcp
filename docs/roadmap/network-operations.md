@@ -1,12 +1,28 @@
 # Network Operations Roadmap
 
-Current guarded migration: implemented with focused offline qualification; the 2026-10-05
-live-defect fixes were live accepted on V21 (see the
-[improvement log](../IMPROVEMENT_LOG.md)); final combined gates remain pending. Version `1.0`, warnings/explicit nulls and
-`dryRun` replace Network tokens; **omitting dryRun executes**. Historical Phase4/worker-only
-qualification below applies only to recorded frozen sources. See the
-[guarded Network design](../superpowers/specs/2026-10-03-network-json-guarded-write-design.md) and
-[implementation plan](../superpowers/plans/2026-10-03-network-json-guarded-write.md).
+Current Network writes: contract `2.0`; `network_read` stays `1.0`. The native-rejections
+migration passed its scoped live matrix on installed source `75c0568`:
+17 expected functional outcomes, followed by five timing warm-ups and 15 measured calls. The
+Task 7 fixture/offline closeout at that stage passed 7,665 tests and 95.11% linked host/contracts
+line coverage. A later host-only follow-up validates raw outcomes and worker-response carriers
+before permissive decoding, without request replay or worker replacement. Twelve previously
+failing malformed-wire cases, sixteen new controls and the focused 517-test set passed. The worker
+is unchanged; this host follow-up has offline evidence only and no new live/timing qualification.
+See the [live verification and limits](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+and [implementation plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-26-network-write-native-rejections.md).
+Warnings/explicit nulls and `dryRun` replace Network tokens; **omitting dryRun executes**.
+Historical Phase4/worker-only qualification below applies only to recorded frozen sources.
+
+Planning uses one initial hardware snapshot without per-item replanning. Successful prefix items
+report `trusted` or `superseded` through the shared `TrustedWriteVerifier` and domain policies;
+failed/skipped items have no verification entry. Configure stops at the first native rejection and
+retains its typed `appliedSettings`. `skippedSettings`, immediate `identity`/`checks`, `finalChecks`
+and `networkDeviceCount` are retired. A failed item can retain applied changes; inspect it with
+`network_read` before retrying. The L3 colliding-rename fix checks the already-read subnet name
+before transaction commit. Same-call connect-then-delete guards still use the initial snapshot.
+Duplicate IP/PROFINET-name writes were accepted with silent public PLC-software compilation;
+separate maintainer hardware-compile observations reported those collisions. The literal invalid
+PN name was accepted/normalized. These are scoped observations, not broader native acceptance.
 
 Status: Phases 1 and 2 are complete. Phase 3 implementation and its separately authorized,
 read-only TIA Portal V21 evidence run are complete, but final stabilization is pending design
@@ -38,7 +54,7 @@ merge-ready on that explicit source/behavioral-equivalence decision; no merge
 or current-HEAD Portal run is claimed.
 
 Phase 2 completion is scoped narrowly: Tasks 1-7 of
-`docs/superpowers/plans/2026-08-02-network-operations-phase2-json-contract.md` are implemented and
+the [Phase 2 plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-02-network-operations-phase2-json-contract.md) are implemented and
 their automated gates pass — the stub build, `dotnet test TiaMcpServer.Tests`, the FakeWorker
 protocol tests (including the multi-homed read-select-preview-apply-read proof and the
 protocol-error stop proof), and the schema/catalog/access-mode tests. It is **not** based on any
@@ -147,7 +163,7 @@ their behavior is suitable.
 
 ### Phase 2: Stabilize the JSON Contract — Complete
 
-Completed: `network_read` and `network_write` both declare an MCP output schema and return one
+Completed: `network_read` (`1.0`) and `network_write` (`2.0`) both declare an MCP output schema and return one
 canonical JSON document identically in `content` and `structuredContent` — no nested JSON string
 anywhere in the response. That historical Network envelope used `preview | apply | error`; the current guarded envelope uses `preview | applied | blocked | error`.
 Configure operations use nested `target: { deviceName, nodeId }` and
@@ -205,12 +221,12 @@ network-attribute writes, project save, or hardware compile.
 Design rationale and the evidence basis (a read-only subnet metadata probe and an explicitly
 enabled internal mutation probe, both run against disposable TIA Portal V21 project copies before
 the public contract was settled) are recorded in
-[../superpowers/specs/2026-08-06-network-phase4-subnet-lifecycle-design.md](../superpowers/specs/2026-08-06-network-phase4-subnet-lifecycle-design.md).
+[ADR-0012](../adr/0012-portal-as-rejection-authority.md).
 The full request/result contract, targeting rules, and current evidence status are documented in
 [../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md](../SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md).
 
 The original static completion mark covered Tasks 1-9 of
-`docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md`. The subsequent audit found
+the [Phase 4 plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md). The subsequent audit found
 four contract gaps; PR 1 repairs them and restores a guarded public harness. The first
 current-revision public run on 2026-09-23 failed at connected Ethernet deletion after isolated
 operations passed. The fresh 2026-09-24 run passed both connected deletes and its post-read, with
@@ -227,12 +243,13 @@ were observed; the PN extension toggle also changed and restored a linked PN dev
 PN `MultipleUseIoSystem` remains excluded because a committed toggle made that linked name
 unavailable before compile. `MaxNumberIWlanLinksPerSegment` remains excluded as an unknown
 attribute in this fixture; no DP dynamic field was admitted. See the
-[qualified contract](../superpowers/specs/2026-09-24-network-phase5-qualified-contract.md)
+[qualified contract](../adr/0003-network-domain-identity-and-subnet-lifecycle.md)
 and [bounded live report](../superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md).
 
-The temporary `probe_io_system_qualification` produced that
-evidence, but add no public operation. `update_io_system` is still unshipped. Later modeled
-and dynamic slices require their own plans from merged `main`, strict TDD, guarded-pipeline dry-run
+The now-retired `probe_io_system_qualification` produced that evidence without adding a public
+operation. The reports and raw inputs are preserved; the worker route is removed. Future IO-system
+work uses that historical evidence and cannot invoke the retired route. `update_io_system` is still
+unshipped. Later modeled and dynamic slices require their own plans from merged `main`, strict TDD, guarded-pipeline dry-run
 and audit gates, and scope-specific live acceptance. A known committed post-read or hardware
 compile failure must be reported truthfully; no live failed compile was induced in PR 2.
 
@@ -263,7 +280,7 @@ commissioning behavior.
 - Never silently ignore an unknown or non-writable field.
 - Keep read diagnostics and missing-data evidence instead of synthesizing values.
 - Resolve exact requested intent/current state under a pinned verified binding; a dry run reserves no state.
-- Return enough postcondition evidence for an agent to verify what changed.
+- Return typed mutation outcomes and verification status; use explicit reads to inspect a failed item.
 
 ## Implementation Anchors
 
